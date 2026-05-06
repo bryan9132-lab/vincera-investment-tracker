@@ -1,0 +1,9 @@
+flask>=3.0
+flask-sqlalchemy>=3.1
+flask-cors>=4.0
+pymupdf>=1.24
+pillow>=10.0
+pytesseract>=0.3.10
+requests>=2.31
+openpyxl>=3.1
+gunicorn>=21.0

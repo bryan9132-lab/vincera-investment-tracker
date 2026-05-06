@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>投資管理系統</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --surface2:  #222638;
+    --border:    #2e3354;
+    --accent:    #4f8ef7;
+    --accent2:   #6ee7b7;
+    --danger:    #f87171;
+    --warn:      #fbbf24;
+    --text:      #e2e8f0;
+    --muted:     #8892a4;
+    --font:      'Noto Sans TC', sans-serif;
+    --mono:      'DM Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text); font-weight: 300; }
+
+  .header-date {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ── Layout ── */
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    width: 100%;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 48px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .upload-zone:hover,
+  .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(79, 142, 247, 0.05);
+  }
+  .upload-zone input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .upload-icon { font-size: 36px; margin-bottom: 12px; }
+  .upload-label { font-size: 15px; color: var(--text); margin-bottom: 6px; }
+  .upload-hint  { font-size: 12px; color: var(--muted); }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary  { background: var(--accent);  color: #fff; }
+  .btn-primary:hover:not(:disabled)  { background: #3a7af0; }
+  .btn-success  { background: #059669; color: #fff; }
+  .btn-success:hover:not(:disabled)  { background: #047857; }
+  .btn-danger   { background: #dc2626; color: #fff; }
+  .btn-danger:hover:not(:disabled)   { background: #b91c1c; }
+  .btn-ghost    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover:not(:disabled)    { color: var(--text); border-color: var(--muted); }
+
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+
+  /* ── Preview table ── */
+  .preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .tag-blue   { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .tag-green  { background: rgba(110,231,183,0.15); color: var(--accent2); }
+  .tag-orange { background: rgba(251,191,36,0.15); color: var(--warn); }
+
+  .meta-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .meta-item { font-size: 13px; }
+  .meta-item label { color: var(--muted); margin-right: 6px; }
+  .meta-item strong { font-family: var(--mono); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    background: var(--surface2);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 10px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+  }
+  th:first-child, th:nth-child(2) { text-align: left; }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    text-align: right;
+    font-size: 12px;
+  }
+  td:first-child { text-align: left; font-family: var(--font); font-weight: 600; }
+  td:nth-child(2) { text-align: left; font-family: var(--font); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .positive { color: var(--accent2); }
+  .negative { color: var(--danger); }
+
+  /* ── Holdings grid ── */
+  .holdings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+    gap: 16px;
+  }
+
+  .entity-block {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .entity-header {
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 13px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* ── Toast ── */
+  #toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 9999;
+  }
+
+  .toast {
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    animation: slideIn 0.2s ease;
+    max-width: 360px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .toast-success { background: #065f46; color: #d1fae5; border: 1px solid #059669; }
+  .toast-error   { background: #7f1d1d; color: #fee2e2; border: 1px solid #dc2626; }
+  .toast-info    { background: #1e3a5f; color: #bfdbfe; border: 1px solid #3b82f6; }
+
+  @keyframes slideIn {
+    from { transform: translateX(40px); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+
+  /* ── Loading spinner ── */
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Misc ── */
+  .empty-state {
+    text-align: center;
+    padding: 48px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .warning-box {
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--warn);
+    margin-bottom: 16px;
+  }
+
+  /* ── Name edit input ── */
+  .name-input {
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 4px 8px;
+    width: 160px;
+  }
+
+  /* ── Section tabs ── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+  .tab:hover    { color: var(--text); }
+  .tab.active   { background: var(--surface2); border-color: var(--border); color: var(--text); }
+  .tab-panel    { display: none; }
+  .tab-panel.active { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">RCSF <span>投資管理系統</span></div>
+  <div class="header-date" id="header-date"></div>
+</header>
+
+<div class="container">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('upload')">📄 上傳交易</div>
+    <div class="tab" onclick="switchTab('holdings')">📊 庫存總表</div>
+    <div class="tab" onclick="switchTab('history')">📋 交易記錄</div>
+  </div>
+
+  <!-- ── Tab: Upload ── -->
+  <div class="tab-panel active" id="tab-upload">
+
+    <div class="card">
+      <div class="card-title">上傳交易 PDF</div>
+
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="file-input" accept=".pdf" onchange="handleFileSelect(this)">
+        <div class="upload-icon">📂</div>
+        <div class="upload-label">拖曳或點擊選擇 PDF</div>
+        <div class="upload-hint">支援：國泰、統一、元大　每次一個檔案</div>
+      </div>
+    </div>
+
+    <!-- Preview (hidden until upload) -->
+    <div class="card" id="preview-card" style="display:none">
+      <div class="card-title">交易預覽　請確認後儲存</div>
+
+      <div class="preview-header">
+        <div class="meta-row" id="meta-row"></div>
+        <div id="entity-tag"></div>
+      </div>
+
+      <div id="warnings-box" style="display:none" class="warning-box"></div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>股票代號</th>
+            <th>股票名稱</th>
+            <th>買/賣</th>
+            <th>股數</th>
+            <th>單價</th>
+            <th>成交金額</th>
+            <th>手續費</th>
+            <th>交易稅</th>
+            <th>淨收付</th>
+          </tr>
+        </thead>
+        <tbody id="preview-body"></tbody>
+      </table>
+
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="confirmUpload()">✅ 確認儲存</button>
+        <button class="btn btn-ghost"   onclick="cancelUpload()">✗ 取消</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Tab: Holdings ── -->
+  <div class="tab-panel" id="tab-holdings">
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div style="font-size:13px; color:var(--muted)" id="price-status">市價尚未更新</div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" onclick="updatePrices()">
+          <span id="price-btn-text">🔄 更新市價</span>
+        </button>
+        <button class="btn btn-success" onclick="exportExcel()">⬇ 匯出 Excel</button>
+      </div>
+    </div>
+
+    <div class="holdings-grid" id="holdings-grid">
+      <div class="empty-state">載入中...</div>
+    </div>
+
+  </div>
+
+  <!-- ── Tab: History ── -->
+  <div class="tab-panel" id="tab-history">
+    <div style="margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <select id="filter-entity" onchange="loadHistory()" style="background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-family:var(--font); font-size:13px;">
+        <option value="">全部帳戶</option>
+        <option>RC</option>
+        <option>華強</option>
+        <option>私銀RC</option>
+        <option>私銀華強</option>
+      </select>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th style="text-align:left">日期</th>
+            <th style="text-align:left">帳戶</th>
+            <th style="text-align:left">券商</th>
+            <th style="text-align:left">代號</th>
+            <th style="text-align:left">名稱</th>
+            <th>股數</th>
+            <th>單價</th>
+            <th>成交金額</th>
+            <th>淨收付</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+const API = '';  // same origin
+let pendingUpload = null;
+
+// ── Date header ──────────────────────────────────────────────────────────────
+document.getElementById('header-date').textContent =
+  new Date().toLocaleDateString('zh-TW', {year:'numeric',month:'long',day:'numeric',weekday:'short'});
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const panels = ['upload','holdings','history'];
+    t.classList.toggle('active', panels[i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'holdings') loadHoldings();
+  if (name === 'history')  loadHistory();
+}
+
+// ── File upload ───────────────────────────────────────────────────────────────
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.pdf')) uploadFile(file);
+  else toast('請選擇 PDF 檔案', 'error');
+});
+
+function handleFileSelect(input) {
+  if (input.files[0]) uploadFile(input.files[0]);
+}
+
+async function uploadFile(file) {
+  zone.querySelector('.upload-label').textContent = `解析中：${file.name}`;
+  zone.querySelector('.upload-icon').innerHTML = '<div class="spinner"></div>';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res  = await fetch(`${API}/api/upload`, { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      toast(data.error || '上傳失敗', 'error');
+      resetUploadZone();
+      return;
+    }
+
+    pendingUpload = { ...data, filename: file.name };
+    showPreview(data);
+
+  } catch(e) {
+    toast('連線失敗，請稍後再試', 'error');
+    resetUploadZone();
+  }
+}
+
+function resetUploadZone() {
+  zone.querySelector('.upload-label').textContent = '拖曳或點擊選擇 PDF';
+  zone.querySelector('.upload-icon').textContent  = '📂';
+  document.getElementById('file-input').value = '';
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+function showPreview(data) {
+  document.getElementById('preview-card').style.display = 'block';
+  resetUploadZone();
+
+  // Meta row
+  document.getElementById('meta-row').innerHTML = `
+    <div class="meta-item"><label>帳號</label><strong>${data.account_no}</strong></div>
+    <div class="meta-item"><label>券商</label><strong>${data.broker}</strong></div>
+    <div class="meta-item"><label>交易日</label><strong>${data.trade_date}</strong></div>
+    ${data.settle_date ? `<div class="meta-item"><label>交割日</label><strong>${data.settle_date}</strong></div>` : ''}
+  `;
+
+  document.getElementById('entity-tag').innerHTML =
+    `<span class="tag tag-blue">${data.entity}</span>`;
+
+  // Warnings
+  const warnBox = document.getElementById('warnings-box');
+  if (data.warnings?.length || data.unknown_codes?.length) {
+    let msg = '';
+    if (data.unknown_codes?.length)
+      msg += `⚠ 未知股票代號：${data.unknown_codes.join(', ')}，請確認名稱正確<br>`;
+    data.warnings?.forEach(w => msg += `⚠ ${w}<br>`);
+    warnBox.innerHTML = msg;
+    warnBox.style.display = 'block';
+  } else {
+    warnBox.style.display = 'none';
+  }
+
+  // Trades table
+  const tbody = document.getElementById('preview-body');
+  tbody.innerHTML = '';
+  data.trades.forEach((t, i) => {
+    const isBuy    = t.shares > 0;
+    const absShare = Math.abs(t.shares).toLocaleString();
+    const nameCell = t.name_confirmed
+      ? t.security_name
+      : `<input class="name-input" id="name-${i}" value="${t.security_name}" placeholder="請輸入名稱">`;
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.security_code}</td>
+        <td>${nameCell}</td>
+        <td><span class="tag ${isBuy ? 'tag-green' : 'tag-orange'}">${isBuy ? '買入' : '賣出'}</span></td>
+        <td>${absShare}</td>
+        <td>${t.price.toLocaleString()}</td>
+        <td>${t.gross_amount.toLocaleString()}</td>
+        <td>${t.fee.toLocaleString()}</td>
+        <td>${t.tax.toLocaleString()}</td>
+        <td class="${isBuy ? 'negative' : 'positive'}">${t.net_amount.toLocaleString()}</td>
+      </tr>`;
+  });
+}
+
+async function confirmUpload() {
+  if (!pendingUpload) return;
+
+  // Pull any edited names back into the payload
+  pendingUpload.trades.forEach((t, i) => {
+    const input = document.getElementById(`name-${i}`);
+    if (input) t.security_name = input.value.trim();
+  });
+
+  try {
+    const res  = await fetch(`${API}/api/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pendingUpload),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      toast(`✅ ${data.message}`, 'success');
+      document.getElementById('preview-card').style.display = 'none';
+      pendingUpload = null;
+    } else {
+      toast(data.error || '儲存失敗', 'error');
+    }
+  } catch(e) {
+    toast('連線失敗', 'error');
+  }
+}
+
+function cancelUpload() {
+  document.getElementById('preview-card').style.display = 'none';
+  pendingUpload = null;
+}
+
+// ── Holdings ─────────────────────────────────────────────────────────────────
+async function loadHoldings() {
+  const grid = document.getElementById('holdings-grid');
+  grid.innerHTML = '<div class="empty-state">載入中...</div>';
+
+  const res  = await fetch(`${API}/api/positions`);
+  const data = await res.json();
+
+  if (!Object.keys(data).length) {
+    grid.innerHTML = '<div class="empty-state">目前無持倉資料</div>';
+    return;
+  }
+
+  grid.innerHTML = '';
+  const order = ['RC', '華強', '私銀RC', '私銀華強'];
+  order.forEach(entity => {
+    const positions = data[entity];
+    if (!positions?.length) return;
+
+    const totalCost = positions.reduce((s, p) => s + (p.total_cost || 0), 0);
+    const totalMV   = positions.reduce((s, p) => s + (p.market_value || 0), 0);
+    const totalPnL  = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
+
+    const rows = positions.map(p => `
+      <tr>
+        <td>${p.security_code}</td>
+        <td>${p.security_name}</td>
+        <td>${(p.shares/1000).toFixed(3)}</td>
+        <td>${p.avg_cost?.toLocaleString(undefined,{maximumFractionDigits:2}) ?? '-'}</td>
+        <td>${p.last_price?.toLocaleString() ?? '-'}</td>
+        <td class="${(p.unrealized_pnl||0)>=0?'positive':'negative'}">
+          ${p.unrealized_pnl != null ? Math.round(p.unrealized_pnl).toLocaleString() : '-'}
+        </td>
+      </tr>`).join('');
+
+    grid.innerHTML += `
+      <div class="entity-block">
+        <div class="entity-header">
+          <span>${entity}</span>
+          <span style="font-size:12px;color:var(--muted);font-family:var(--mono)">
+            損益 <span class="${totalPnL>=0?'positive':'negative'}">${Math.round(totalPnL).toLocaleString()}</span>
+          </span>
+        </div>
+        <table style="font-size:12px">
+          <thead><tr>
+            <th style="text-align:left">代號</th>
+            <th style="text-align:left">名稱</th>
+            <th>張數</th><th>成本</th><th>市價</th><th>未實現損益</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  });
+}
+
+async function updatePrices() {
+  const btn = document.getElementById('price-btn-text');
+  btn.innerHTML = '<span class="spinner"></span> 更新中...';
+
+  try {
+    const res  = await fetch(`${API}/api/prices/update`, { method: 'POST' });
+    const data = await res.json();
+    toast(`✅ 更新 ${data.updated} 檔，失敗 ${data.failed} 檔`, data.failed > 0 ? 'info' : 'success');
+    document.getElementById('price-status').textContent =
+      `市價更新：${new Date().toLocaleTimeString('zh-TW')}`;
+    loadHoldings();
+  } catch(e) {
+    toast('更新失敗', 'error');
+  } finally {
+    btn.textContent = '🔄 更新市價';
+  }
+}
+
+function exportExcel() {
+  window.location = `${API}/api/export`;
+  toast('📥 下載中...', 'info');
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const entity = document.getElementById('filter-entity').value;
+  const url    = `${API}/api/transactions?limit=200${entity ? '&entity=' + entity : ''}`;
+  const res    = await fetch(url);
+  const txns   = await res.json();
+
+  const tbody = document.getElementById('history-body');
+  if (!txns.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = txns.map(t => {
+    const isBuy = t.shares > 0;
+    return `<tr>
+      <td style="text-align:left;font-family:var(--mono)">${t.trade_date}</td>
+      <td style="text-align:left">${t.entity}</td>
+      <td style="text-align:left">${t.broker}</td>
+      <td style="text-align:left;font-family:var(--mono)">${t.security_code||''}</td>
+      <td style="text-align:left">${t.security_name||''}</td>
+      <td class="${isBuy?'positive':'negative'}">${Math.abs(t.shares).toLocaleString()}</td>
+      <td>${t.price?.toLocaleString()??'-'}</td>
+      <td>${t.gross_amount?.toLocaleString()??'-'}</td>
+      <td class="${isBuy?'negative':'positive'}">${t.net_amount?.toLocaleString()??'-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, type='info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+</script>
+</body>
+</html>
