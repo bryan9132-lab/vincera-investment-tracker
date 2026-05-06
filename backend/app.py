@@ -219,6 +219,88 @@ def create_app():
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
 
+    # ── One-time migration endpoint ──────────────────────────────────────────
+    @app.route('/api/migrate', methods=['POST'])
+    def run_migration():
+        """
+        One-time endpoint to migrate data from uploaded Excel.
+        Protected by a secret key.
+        """
+        secret = request.json.get('secret', '')
+        if secret != os.environ.get('MIGRATE_SECRET', 'vincera2026'):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        try:
+            import openpyxl, sys
+            from io import BytesIO
+            import base64
+
+            excel_b64 = request.json.get('excel_data')
+            if not excel_b64:
+                return jsonify({'error': 'No excel_data provided'}), 400
+
+            excel_bytes = base64.b64decode(excel_b64)
+            wb = openpyxl.load_workbook(BytesIO(excel_bytes), data_only=True)
+
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from migrate_excel import (migrate_rc_tuni, migrate_rc_yuanta,
+                                       migrate_hq_tuni, migrate_hq_yuanta,
+                                       migrate_private_rc, migrate_private_hq)
+
+            # Clear existing
+            Transaction.query.delete()
+            Position.query.delete()
+            db.session.commit()
+
+            sheet_handlers = [
+                ('(RC)統一進出明細TWD',   migrate_rc_tuni),
+                ('(RC)元大進出明細TWD',   migrate_rc_yuanta),
+                ('(華強)統一進出明細TWD', migrate_hq_tuni),
+                ('(華強)元大進出明細TWD', migrate_hq_yuanta),
+                ('(私RC)TWD',            migrate_private_rc),
+                ('(私強)進出明細TWD',     migrate_private_hq),
+            ]
+
+            total = 0
+            summary = {}
+            for sheet_name, handler in sheet_handlers:
+                ws     = wb[sheet_name]
+                trades = handler(ws, app)
+                summary[sheet_name] = len(trades)
+                for t in trades:
+                    code = t['security_code']
+                    if code and not Security.query.get(code):
+                        db.session.add(Security(code=code, name=code))
+                    txn = Transaction(
+                        trade_date    = t['trade_date'],
+                        entity        = t['entity'],
+                        broker        = t['broker'],
+                        account_no    = t['account_no'],
+                        security_code = t['security_code'],
+                        shares        = t['shares'],
+                        price         = t['price'],
+                        gross_amount  = t['gross_amount'],
+                        fee           = t['fee'],
+                        tax           = t['tax'],
+                        net_amount    = t['net_amount'],
+                        source_file   = 'excel_migration',
+                    )
+                    db.session.add(txn)
+                    total += 1
+
+            db.session.commit()
+            recalculate_positions()
+
+            return jsonify({
+                'status': 'ok',
+                'total_transactions': total,
+                'summary': summary,
+            })
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
     # ── Transaction history ──────────────────────────────────────────────────
     @app.route('/api/transactions', methods=['GET'])
     def get_transactions():
