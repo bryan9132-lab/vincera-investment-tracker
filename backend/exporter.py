@@ -70,11 +70,13 @@ def generate_excel() -> str:
     # ── Row 3: Sub-headers ────────────────────────────────────────────────────
     for col in [1,2,3]:
         ws.merge_cells(start_row=2,start_column=col,end_row=3,end_column=col)
-    sub = ['','',''] + ['張數','成本','金額']*4 + ['RC','華強','私RC','私強']
-    for i, h in enumerate(sub, 1):
-        c = ws.cell(3, i, h)
+    # Row 3 sub-headers — skip merged cells (cols 1,2,3 are merged with row 2)
+    sub_cols = list(range(4, 20))  # cols 4-19 only
+    sub_vals = ['張數','成本','金額']*4 + ['RC','華強','私RC','私強']
+    for col_i, h in zip(sub_cols, sub_vals):
+        c = ws.cell(3, col_i, h)
         c.font = Font(name='微軟正黑體', bold=True, size=9, color='FFFFFF')
-        c.fill = sub_fill if h else hdr_fill
+        c.fill = sub_fill
         c.alignment = Alignment(horizontal='center', vertical='center')
         c.border = bdr
     ws.row_dimensions[3].height = 18
@@ -164,12 +166,13 @@ def generate_excel() -> str:
     row += 1
     _s(ws, row, 1, '',      fill=sub_fill, border=bdr)
     _s(ws, row, 2, '',      fill=sub_fill, border=bdr)
-    for label in ['RC','華強','RC','華強','RC','華強']:
-        _s(ws, row, col-7 if col > 9 else col,
-           label, bold=True, align='center', fill=sub_fill, border=bdr, color='FFFFFF')
-    # Manually set sub-headers
+    # Sub-headers for P&L table
     for i, lbl in enumerate(['RC','華強','RC','華強','RC','華強'], 3):
-        _s(ws, row, i, lbl, bold=True, align='center', fill=sub_fill, border=bdr, color='FFFFFF')
+        c2 = ws.cell(row, i, lbl)
+        c2.font = Font(name='微軟正黑體', bold=True, size=9, color='FFFFFF')
+        c2.fill = sub_fill
+        c2.alignment = Alignment(horizontal='center', vertical='center')
+        c2.border = bdr
     row += 1
 
     uRC  = sum(p.unrealized_pnl() or 0 for p in Position.query.filter_by(entity='RC').filter(Position.shares>0).all())
