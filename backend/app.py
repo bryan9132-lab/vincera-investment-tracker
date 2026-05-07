@@ -12,7 +12,7 @@ from datetime import datetime, date
 import tempfile
 
 from backend.models import db, Transaction, Position, Security, UploadLog, ACCOUNT_MAP
-from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name
+from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
 
@@ -196,6 +196,13 @@ def create_app():
             result[ent].append(pos.to_dict())
         return jsonify(result)
 
+    # ── Realized P&L ────────────────────────────────────────────────────────
+    @app.route('/api/realized_pnl', methods=['GET'])
+    def get_realized_pnl():
+        """Calculate realized P&L for all entities"""
+        result = calculate_realized_pnl()
+        return jsonify(result)
+
     # ── Update market prices ─────────────────────────────────────────────────
     @app.route('/api/prices/update', methods=['POST'])
     def update_prices():
@@ -360,6 +367,36 @@ def create_app():
         return send_file(tmp.name, as_attachment=True,
             download_name=f'交易記錄_{label}_{date.today().strftime("%Y%m%d")}.xlsx',
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    # ── Edit / Delete transaction ───────────────────────────────────────────
+    @app.route('/api/transactions/<int:txn_id>', methods=['PUT'])
+    def edit_transaction(txn_id):
+        """Edit a transaction and recalculate positions"""
+        txn  = Transaction.query.get_or_404(txn_id)
+        data = request.json
+        entity = txn.entity
+        txn.trade_date    = date.fromisoformat(data['trade_date'])
+        txn.security_code = data.get('security_code', txn.security_code)
+        txn.security_name = data.get('security_name', txn.security_name)
+        txn.shares        = float(data['shares'])
+        txn.price         = float(data['price'])
+        txn.gross_amount  = float(data['gross_amount'])
+        txn.fee           = float(data.get('fee', txn.fee))
+        txn.tax           = float(data.get('tax', txn.tax))
+        txn.net_amount    = float(data['net_amount'])
+        db.session.commit()
+        recalculate_positions(entity)
+        return jsonify({'status': 'ok'})
+
+    @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
+    def delete_transaction(txn_id):
+        """Delete a transaction and recalculate positions"""
+        txn    = Transaction.query.get_or_404(txn_id)
+        entity = txn.entity
+        db.session.delete(txn)
+        db.session.commit()
+        recalculate_positions(entity)
+        return jsonify({'status': 'ok'})
 
     # ── Securities lookup ────────────────────────────────────────────────────
     @app.route('/api/securities/lookup', methods=['GET'])

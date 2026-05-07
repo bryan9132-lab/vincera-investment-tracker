@@ -105,3 +105,46 @@ def update_all_prices():
         })
     db.session.commit()
     return results
+
+
+def calculate_realized_pnl(entity: str = None):
+    """
+    Calculate realized P&L for each entity by replaying transaction history.
+    Returns dict: {entity: realized_pnl}
+    """
+    from .models import Transaction, ACCOUNT_MAP
+    entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
+    result = {}
+
+    for ent in entities:
+        txns = (Transaction.query
+                .filter_by(entity=ent)
+                .filter(Transaction.security_code.isnot(None))
+                .order_by(Transaction.trade_date)
+                .all())
+
+        holdings = {}
+        realized = 0.0
+
+        for t in txns:
+            code = t.security_code
+            if code not in holdings:
+                holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
+            if t.shares > 0:
+                holdings[code]['shares']     += t.shares
+                holdings[code]['total_cost'] += t.gross_amount + t.fee
+            else:
+                if holdings[code]['shares'] > 0:
+                    sell_qty   = abs(t.shares)
+                    avg_cost   = holdings[code]['total_cost'] / holdings[code]['shares']
+                    cost_basis = avg_cost * sell_qty
+                    realized  += t.net_amount - cost_basis
+                    holdings[code]['shares']     -= sell_qty
+                    holdings[code]['total_cost'] -= avg_cost * sell_qty
+                    if holdings[code]['shares'] < 0.001:
+                        holdings[code]['shares']     = 0
+                        holdings[code]['total_cost'] = 0
+
+        result[ent] = round(realized, 0)
+
+    return result
