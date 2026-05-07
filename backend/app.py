@@ -265,7 +265,7 @@ def create_app():
             summary = {}
             for sheet_name, handler in sheet_handlers:
                 ws     = wb[sheet_name]
-                trades = handler(ws, app)
+                trades = handler(ws)
                 summary[sheet_name] = len(trades)
                 for t in trades:
                     code = t['security_code']
