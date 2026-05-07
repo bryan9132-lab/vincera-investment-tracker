@@ -58,32 +58,38 @@ tr:last-child td{border-bottom:none}
 tr:hover td{background:rgba(255,255,255,.02)}
 .positive{color:var(--accent2)}
 .negative{color:var(--danger)}
-/* P&L cards */
+/* P&L summary cards */
 .pnl-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:20px}
 .pnl-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
 .pnl-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
 .pnl-value{font-size:18px;font-weight:700;font-family:var(--mono)}
 .pnl-sub{font-size:11px;color:var(--muted);margin-top:3px;font-family:var(--mono)}
-/* Stock row blocks */
-.stock-block{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px}
-.stock-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}
-.stock-header-left{display:flex;align-items:center;gap:10px}
-.stock-code{font-size:13px;font-weight:700;font-family:var(--mono)}
-.stock-name{font-size:13px;color:var(--muted)}
-.stock-price{display:flex;align-items:center;gap:10px}
-.stock-price label{font-size:11px;color:var(--muted)}
-.stock-price span{font-size:14px;font-weight:500;font-family:var(--mono)}
-.entity-cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:12px 16px;gap:8px}
-.entity-col{display:flex;flex-direction:column;gap:3px}
-.entity-col-header{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
-.col-shares{font-size:13px;font-weight:700}
-.col-cost{font-size:12px;color:var(--muted);font-family:var(--mono)}
-.col-amount{font-size:12px;font-family:var(--mono)}
-.col-pnl{font-size:12px;font-family:var(--mono);font-weight:600}
-.col-empty{font-size:12px;color:var(--border)}
-/* Realized P&L summary table */
-.realized-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
-.realized-table th{padding:8px 12px;background:var(--surface2);color:var(--muted);font-size:11px;text-transform:uppercase;border:1px solid var(--border)}
+/* Fund boxes - 2x2 grid */
+.fund-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.fund-block{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.fund-header{padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.fund-name{font-size:14px;font-weight:700}
+.fund-total{font-size:12px;font-family:var(--mono);color:var(--muted)}
+.fund-stocks{padding:0}
+.stock-row{display:grid;grid-template-columns:1fr auto;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px}
+.stock-row:last-child{border-bottom:none}
+.stock-row-left{display:flex;flex-direction:column;gap:3px}
+.stock-row-code{font-size:12px;font-weight:700;font-family:var(--mono);color:var(--muted)}
+.stock-row-name{font-size:13px;font-weight:500}
+.stock-row-right{display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.stock-shares{font-size:14px;font-weight:700}
+.stock-cost{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.stock-amount{font-size:12px;font-family:var(--mono)}
+.stock-pnl{font-size:12px;font-family:var(--mono);font-weight:600}
+.stock-price{font-size:11px;color:var(--muted)}
+.fund-empty{padding:20px 16px;text-align:center;color:var(--muted);font-size:13px}
+/* Totals bar */
+.totals-bar{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:20px}
+.totals-inner{display:grid;grid-template-columns:1fr repeat(4,minmax(0,1fr));gap:8px;font-size:13px;align-items:center}
+/* Realized P&L table */
+.realized-table{width:100%;border-collapse:collapse;font-size:13px}
+.realized-table th{padding:8px 12px;background:var(--surface2);color:var(--muted);font-size:11px;text-transform:uppercase;border:1px solid var(--border);text-align:right}
+.realized-table th.left{text-align:left}
 .realized-table td{padding:8px 12px;border:1px solid var(--border);text-align:right;font-family:var(--mono)}
 .realized-table td.left{text-align:left;font-family:var(--font)}
 .realized-table tr.total-row td{background:var(--surface2);font-weight:700}
@@ -109,7 +115,6 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
 .modal-field input:focus{outline:none;border-color:var(--accent)}
 .modal-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .modal-actions{display:flex;gap:10px;margin-top:20px;justify-content:flex-end}
-/* Spinner */
 .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
 .empty-state{text-align:center;padding:44px;color:var(--muted);font-size:14px}
@@ -148,24 +153,32 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <div class="empty-state" style="grid-column:1/-1;padding:20px">載入中...</div>
     </div>
 
-    <!-- Realized P&L Summary Table -->
-    <div class="card" id="realized-section" style="display:none">
-      <div class="card-title">損益概覽</div>
-      <table class="realized-table" id="realized-table"></table>
-    </div>
+    <!-- 4 Fund Boxes -->
+    <div class="fund-grid" id="fund-grid"></div>
 
-    <!-- Stock blocks -->
-    <div id="stock-blocks"></div>
-
-    <!-- Totals -->
-    <div id="totals-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-top:4px">
-      <div style="display:grid;grid-template-columns:1fr repeat(4,minmax(0,1fr));gap:8px;font-size:13px;align-items:center">
+    <!-- Totals Bar -->
+    <div class="totals-bar" id="totals-bar" style="display:none">
+      <div class="totals-inner">
         <div style="font-weight:700;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em">小計（金額）</div>
-        <div id="total-rc" style="text-align:right;font-family:var(--mono);font-weight:700"></div>
-        <div id="total-hq" style="text-align:right;font-family:var(--mono);font-weight:700"></div>
+        <div id="total-rc"  style="text-align:right;font-family:var(--mono);font-weight:700"></div>
+        <div id="total-hq"  style="text-align:right;font-family:var(--mono);font-weight:700"></div>
         <div id="total-prc" style="text-align:right;font-family:var(--mono);font-weight:700"></div>
         <div id="total-phq" style="text-align:right;font-family:var(--mono);font-weight:700"></div>
       </div>
+      <!-- Column labels -->
+      <div class="totals-inner" style="margin-top:4px">
+        <div></div>
+        <div style="text-align:right;font-size:11px;color:var(--muted)">RC</div>
+        <div style="text-align:right;font-size:11px;color:var(--muted)">華強</div>
+        <div style="text-align:right;font-size:11px;color:var(--muted)">私RC</div>
+        <div style="text-align:right;font-size:11px;color:var(--muted)">私強</div>
+      </div>
+    </div>
+
+    <!-- 損益概覽 (bottom) -->
+    <div class="card" id="realized-section" style="display:none">
+      <div class="card-title">損益概覽</div>
+      <table class="realized-table" id="realized-table"></table>
     </div>
   </div>
 
@@ -212,7 +225,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
           <option value="">全部券商</option>
           <option>統一</option><option>元大</option><option>國泰</option>
         </select>
-        <select id="filter-month" class="filter-select" onchange="loadHistory()">
+        <select id="filter-month" class="filter-select" onchange="applyMonthFilter()">
           <option value="">全部月份</option>
         </select>
         <button class="btn btn-success btn-sm" onclick="exportHistory()">⬇ 匯出記錄</button>
@@ -261,7 +274,6 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     </div>
   </div>
 </div>
-
 <div id="toast-container"></div>
 
 <script>
@@ -269,7 +281,6 @@ const API = '';
 let pendingUpload = null;
 let allHistoryTxns = [];
 const ENTITIES = ['RC','華強','私銀RC','私銀華強'];
-const ENT_IDS   = ['rc','hq','prc','phq'];
 
 document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
@@ -289,21 +300,21 @@ async function loadHoldings() {
     fetch(`${API}/api/positions`),
     fetch(`${API}/api/realized_pnl`),
   ]);
-  const positions  = await posRes.json();
+  const positions   = await posRes.json();
   const realizedPnl = await pnlRes.json();
   renderHoldings(positions, realizedPnl);
 }
 
 function renderHoldings(data, realized) {
-  // ── P&L cards ──
+  const labels = {'RC':'RC (元大+統一)','華強':'華強 (元大+統一)','私銀RC':'私RC (國泰)','私銀華強':'私強 (國泰)'};
+
+  // ── P&L summary cards ──
   const pnlGrid = document.getElementById('pnl-grid');
   pnlGrid.innerHTML = '';
-  const labels = {'RC':'RC (元大+統一)','華強':'華強 (元大+統一)','私銀RC':'私RC (國泰)','私銀華強':'私強 (國泰)'};
   ENTITIES.forEach(ent => {
     const positions  = data[ent] || [];
     const unrealized = positions.reduce((s,p) => s+(p.unrealized_pnl||0), 0);
     const real       = realized[ent] || 0;
-    const total      = unrealized + real;
     const hasPx      = positions.some(p => p.last_price);
     pnlGrid.innerHTML += `
       <div class="pnl-card">
@@ -314,130 +325,96 @@ function renderHoldings(data, realized) {
       </div>`;
   });
 
-  // ── Realized summary table ──
-  const realizedSection = document.getElementById('realized-section');
-  const realizedTable   = document.getElementById('realized-table');
-  realizedSection.style.display = 'block';
+  // ── 4 Fund boxes ──
+  const fundGrid = document.getElementById('fund-grid');
+  fundGrid.innerHTML = '';
+  const totals = {};
 
-  const brokerEntities = {
-    '元大+統一': ['RC','華強'],
-    '私銀(國泰)': ['私銀RC','私銀華強'],
-  };
-
-  let html = `<thead><tr>
-    <th class="left" rowspan="2">損益</th>
-    <th colspan="2">元大+統一</th>
-    <th colspan="2">私銀(國泰)</th>
-    <th colspan="2">合計</th>
-  </tr><tr>
-    <th>RC</th><th>華強</th><th>RC</th><th>華強</th><th>RC</th><th>華強</th>
-  </tr></thead><tbody>`;
-
-  const unrealizedRC  = Math.round((data['RC']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
-  const unrealizedHQ  = Math.round((data['華強']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
-  const unrealizedPRC = Math.round((data['私銀RC']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
-  const unrealizedPHQ = Math.round((data['私銀華強']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
-  const realRC  = Math.round(realized['RC']||0);
-  const realHQ  = Math.round(realized['華強']||0);
-  const realPRC = Math.round(realized['私銀RC']||0);
-  const realPHQ = Math.round(realized['私銀華強']||0);
-
-  html += `<tr>
-    <td class="left">已實現損益</td>
-    <td class="${realRC>=0?'positive':'negative'}">${fmt(realRC)}</td>
-    <td class="${realHQ>=0?'positive':'negative'}">${fmt(realHQ)}</td>
-    <td class="${realPRC>=0?'positive':'negative'}">${fmt(realPRC)}</td>
-    <td class="${realPHQ>=0?'positive':'negative'}">${fmt(realPHQ)}</td>
-    <td class="${(realRC+realPRC)>=0?'positive':'negative'}">${fmt(realRC+realPRC)}</td>
-    <td class="${(realHQ+realPHQ)>=0?'positive':'negative'}">${fmt(realHQ+realPHQ)}</td>
-  </tr>`;
-
-  const hasPx = ENTITIES.some(e => (data[e]||[]).some(p=>p.last_price));
-  html += `<tr>
-    <td class="left">未實現損益</td>
-    <td class="${unrealizedRC>=0?'positive':'negative'}">${hasPx?fmt(unrealizedRC):'-'}</td>
-    <td class="${unrealizedHQ>=0?'positive':'negative'}">${hasPx?fmt(unrealizedHQ):'-'}</td>
-    <td class="${unrealizedPRC>=0?'positive':'negative'}">${hasPx?fmt(unrealizedPRC):'-'}</td>
-    <td class="${unrealizedPHQ>=0?'positive':'negative'}">${hasPx?fmt(unrealizedPHQ):'-'}</td>
-    <td class="${(unrealizedRC+unrealizedPRC)>=0?'positive':'negative'}">${hasPx?fmt(unrealizedRC+unrealizedPRC):'-'}</td>
-    <td class="${(unrealizedHQ+unrealizedPHQ)>=0?'positive':'negative'}">${hasPx?fmt(unrealizedHQ+unrealizedPHQ):'-'}</td>
-  </tr>`;
-
-  const totRC=realRC+unrealizedRC, totHQ=realHQ+unrealizedHQ;
-  const totPRC=realPRC+unrealizedPRC, totPHQ=realPHQ+unrealizedPHQ;
-  html += `<tr class="total-row">
-    <td class="left">合計</td>
-    <td class="${totRC>=0?'positive':'negative'}">${fmt(totRC)}</td>
-    <td class="${totHQ>=0?'positive':'negative'}">${fmt(totHQ)}</td>
-    <td class="${totPRC>=0?'positive':'negative'}">${hasPx?fmt(totPRC):'-'}</td>
-    <td class="${totPHQ>=0?'positive':'negative'}">${hasPx?fmt(totPHQ):'-'}</td>
-    <td class="${(totRC+totPRC)>=0?'positive':'negative'}">${hasPx?fmt(totRC+totPRC):'-'}</td>
-    <td class="${(totHQ+totPHQ)>=0?'positive':'negative'}">${hasPx?fmt(totHQ+totPHQ):'-'}</td>
-  </tr></tbody>`;
-  realizedTable.innerHTML = html;
-
-  // ── Stock blocks ──
-  const posMap = {};
   ENTITIES.forEach(ent => {
-    (data[ent]||[]).forEach(p => {
-      if(!posMap[p.security_code]) posMap[p.security_code] = {name:p.security_name, price:p.last_price, entities:{}};
-      posMap[p.security_code].entities[ent] = p;
-      posMap[p.security_code].price = p.last_price || posMap[p.security_code].price;
-    });
-  });
+    const positions = data[ent] || [];
+    const totalAmt  = positions.reduce((s,p) => s+(p.total_cost||0), 0);
+    totals[ent] = totalAmt;
 
-  const blocks = document.getElementById('stock-blocks');
-  blocks.innerHTML = '';
-  const totals = {RC:0,華強:0,'私銀RC':0,'私銀華強':0};
-
-  Object.entries(posMap).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([code, data]) => {
-    const price = data.price;
-    let colsHtml = '';
-    ENTITIES.forEach(ent => {
-      const p = data.entities[ent];
-      if(p) {
-        totals[ent] += p.total_cost||0;
+    let stocksHtml = '';
+    if(!positions.length) {
+      stocksHtml = `<div class="fund-empty">目前無持倉</div>`;
+    } else {
+      positions.forEach(p => {
         const pnl = p.unrealized_pnl;
-        colsHtml += `<div class="entity-col">
-          <div class="entity-col-header">${ent}</div>
-          <div class="col-shares">${Math.round(p.shares/1000)} 張</div>
-          <div class="col-cost">@ ${p.avg_cost?.toFixed(2)??'-'}</div>
-          <div class="col-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'-'}</div>
-          <div class="col-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
-            ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'-'}
-          </div>
-        </div>`;
-      } else {
-        colsHtml += `<div class="entity-col">
-          <div class="entity-col-header">${ent}</div>
-          <div class="col-empty">—</div>
-        </div>`;
-      }
-    });
+        stocksHtml += `
+          <div class="stock-row">
+            <div class="stock-row-left">
+              <div class="stock-row-code">${p.security_code}</div>
+              <div class="stock-row-name">${p.security_name}</div>
+              <div class="stock-price">市價 ${p.last_price??'—'}</div>
+            </div>
+            <div class="stock-row-right">
+              <div class="stock-shares">${Math.round(p.shares/1000)} 張</div>
+              <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
+              <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
+              <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
+                ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'}
+              </div>
+            </div>
+          </div>`;
+      });
+    }
 
-    blocks.innerHTML += `
-      <div class="stock-block">
-        <div class="stock-header">
-          <div class="stock-header-left">
-            <span class="stock-code">${code}</span>
-            <span class="stock-name">${data.name}</span>
-          </div>
-          <div class="stock-price">
-            <label>市價</label>
-            <span>${price??'尚未更新'}</span>
+    const totalPnl = positions.reduce((s,p) => s+(p.unrealized_pnl||0), 0);
+    const hasPx    = positions.some(p => p.last_price);
+    fundGrid.innerHTML += `
+      <div class="fund-block">
+        <div class="fund-header">
+          <div class="fund-name">${ent}</div>
+          <div class="fund-total">
+            ${hasPx ? `損益 <span class="${totalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(totalPnl))}</span>` : ''}
           </div>
         </div>
-        <div class="entity-cols">${colsHtml}</div>
+        <div class="fund-stocks">${stocksHtml}</div>
       </div>`;
   });
 
   // Totals bar
   const bar = document.getElementById('totals-bar');
   bar.style.display = 'block';
-  document.getElementById('total-rc').textContent  = fmt(Math.round(totals['RC']));
-  document.getElementById('total-hq').textContent  = fmt(Math.round(totals['華強']));
-  document.getElementById('total-prc').textContent = fmt(Math.round(totals['私銀RC']));
-  document.getElementById('total-phq').textContent = fmt(Math.round(totals['私銀華強']));
+  document.getElementById('total-rc').textContent  = fmt(Math.round(totals['RC']||0));
+  document.getElementById('total-hq').textContent  = fmt(Math.round(totals['華強']||0));
+  document.getElementById('total-prc').textContent = fmt(Math.round(totals['私銀RC']||0));
+  document.getElementById('total-phq').textContent = fmt(Math.round(totals['私銀華強']||0));
+
+  // ── 損益概覽 (bottom) ──
+  const realizedSection = document.getElementById('realized-section');
+  const realizedTable   = document.getElementById('realized-table');
+  realizedSection.style.display = 'block';
+
+  const hasPx = ENTITIES.some(e => (data[e]||[]).some(p=>p.last_price));
+  const uRC=Math.round((data['RC']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
+  const uHQ=Math.round((data['華強']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
+  const uPRC=Math.round((data['私銀RC']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
+  const uPHQ=Math.round((data['私銀華強']||[]).reduce((s,p)=>s+(p.unrealized_pnl||0),0));
+  const rRC=Math.round(realized['RC']||0), rHQ=Math.round(realized['華強']||0);
+  const rPRC=Math.round(realized['私銀RC']||0), rPHQ=Math.round(realized['私銀華強']||0);
+
+  const pnlRow = (label, rc, hq, prc, phq, cls='') => `<tr class="${cls}">
+    <td class="left">${label}</td>
+    <td class="${rc>=0?'positive':'negative'}">${fmt(rc)}</td>
+    <td class="${hq>=0?'positive':'negative'}">${fmt(hq)}</td>
+    <td class="${prc>=0?'positive':'negative'}">${hasPx?fmt(prc):'-'}</td>
+    <td class="${phq>=0?'positive':'negative'}">${hasPx?fmt(phq):'-'}</td>
+    <td class="${(rc+prc)>=0?'positive':'negative'}">${hasPx?fmt(rc+prc):'-'}</td>
+    <td class="${(hq+phq)>=0?'positive':'negative'}">${hasPx?fmt(hq+phq):'-'}</td>
+  </tr>`;
+
+  realizedTable.innerHTML = `
+    <thead>
+      <tr><th class="left" rowspan="2">損益</th><th colspan="2">元大+統一</th><th colspan="2">私銀(國泰)</th><th colspan="2">合計</th></tr>
+      <tr><th>RC</th><th>華強</th><th>RC</th><th>華強</th><th>RC</th><th>華強</th></tr>
+    </thead>
+    <tbody>
+      ${pnlRow('已實現損益', rRC, rHQ, rPRC, rPHQ)}
+      ${pnlRow('未實現損益', uRC, uHQ, uPRC, uPHQ)}
+      ${pnlRow('合計', rRC+uRC, rHQ+uHQ, rPRC+uPRC, rPHQ+uPHQ, 'total-row')}
+    </tbody>`;
 }
 
 async function updatePrices() {
@@ -452,7 +429,6 @@ async function updatePrices() {
   } catch(e){ toast('更新失敗','error'); }
   finally { btn.textContent='🔄 更新市價'; }
 }
-
 function exportExcel(){ window.location=`${API}/api/export`; toast('📥 下載中...','info'); }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -479,13 +455,11 @@ async function uploadFile(file) {
     showPreview(data);
   } catch(e){toast('連線失敗','error');resetUploadZone();}
 }
-
 function resetUploadZone(){
   zone.querySelector('.upload-label').textContent='拖曳或點擊選擇 PDF';
   zone.querySelector('.upload-icon').textContent='📂';
   document.getElementById('file-input').value='';
 }
-
 function showPreview(data) {
   document.getElementById('preview-card').style.display='block';
   resetUploadZone();
@@ -502,17 +476,15 @@ function showPreview(data) {
     data.warnings?.forEach(w=>msg+=`⚠ ${w}<br>`);
     warnBox.innerHTML=msg; warnBox.style.display='block';
   } else warnBox.style.display='none';
-
   renderPreviewTable(data.trades);
 }
-
 function renderPreviewTable(trades) {
   const tbody=document.getElementById('preview-body');
   tbody.innerHTML='';
   trades.forEach((t,i)=>{
     const isBuy=t.shares>0;
     if(t._editing) {
-      tbody.innerHTML+=`<tr id="preview-row-${i}">
+      tbody.innerHTML+=`<tr>
         <td class="left"><input class="edit-input" style="width:80px" id="pr-code-${i}" value="${t.security_code}"></td>
         <td class="left"><input class="name-input" id="pr-name-${i}" value="${t.security_name}"></td>
         <td class="left"><select class="filter-select" id="pr-dir-${i}" style="padding:4px 8px;font-size:12px">
@@ -533,7 +505,7 @@ function renderPreviewTable(trades) {
     } else {
       const nameCell=t.name_confirmed?t.security_name:
         `<input class="name-input" id="name-${i}" value="${t.security_name}" placeholder="請輸入名稱">`;
-      tbody.innerHTML+=`<tr id="preview-row-${i}">
+      tbody.innerHTML+=`<tr>
         <td class="left">${t.security_code}</td>
         <td class="left">${nameCell}</td>
         <td class="left"><span class="tag ${isBuy?'tag-green':'tag-orange'}">${isBuy?'買入':'賣出'}</span></td>
@@ -551,103 +523,71 @@ function renderPreviewTable(trades) {
     }
   });
 }
-
-function editPreviewRow(i) {
-  const nameInput = document.getElementById(`name-${i}`);
-  if(nameInput) pendingUpload.trades[i].security_name = nameInput.value;
-  pendingUpload.trades[i]._editing = true;
+function editPreviewRow(i){
+  const ni=document.getElementById(`name-${i}`);
+  if(ni) pendingUpload.trades[i].security_name=ni.value;
+  pendingUpload.trades[i]._editing=true; renderPreviewTable(pendingUpload.trades);
+}
+function savePreviewEdit(i){
+  const dir=parseInt(document.getElementById(`pr-dir-${i}`).value);
+  pendingUpload.trades[i]={...pendingUpload.trades[i],
+    security_code:document.getElementById(`pr-code-${i}`).value,
+    security_name:document.getElementById(`pr-name-${i}`).value,
+    shares:parseFloat(document.getElementById(`pr-shares-${i}`).value)*dir,
+    price:parseFloat(document.getElementById(`pr-price-${i}`).value),
+    gross_amount:parseFloat(document.getElementById(`pr-gross-${i}`).value),
+    fee:parseFloat(document.getElementById(`pr-fee-${i}`).value),
+    tax:parseFloat(document.getElementById(`pr-tax-${i}`).value),
+    net_amount:parseFloat(document.getElementById(`pr-net-${i}`).value),
+    name_confirmed:true,_editing:false};
   renderPreviewTable(pendingUpload.trades);
 }
-
-function savePreviewEdit(i) {
-  const dir = parseInt(document.getElementById(`pr-dir-${i}`).value);
-  const shares = parseFloat(document.getElementById(`pr-shares-${i}`).value) * dir;
-  pendingUpload.trades[i] = {
-    ...pendingUpload.trades[i],
-    security_code: document.getElementById(`pr-code-${i}`).value,
-    security_name: document.getElementById(`pr-name-${i}`).value,
-    shares,
-    price:        parseFloat(document.getElementById(`pr-price-${i}`).value),
-    gross_amount: parseFloat(document.getElementById(`pr-gross-${i}`).value),
-    fee:          parseFloat(document.getElementById(`pr-fee-${i}`).value),
-    tax:          parseFloat(document.getElementById(`pr-tax-${i}`).value),
-    net_amount:   parseFloat(document.getElementById(`pr-net-${i}`).value),
-    name_confirmed: true,
-    _editing: false,
-  };
-  renderPreviewTable(pendingUpload.trades);
-}
-
-function cancelPreviewEdit(i) {
-  pendingUpload.trades[i]._editing = false;
-  renderPreviewTable(pendingUpload.trades);
-}
-
-function deletePreviewRow(i) {
-  pendingUpload.trades.splice(i, 1);
-  renderPreviewTable(pendingUpload.trades);
-  toast('已刪除該筆交易','info');
-}
-
-async function confirmUpload() {
+function cancelPreviewEdit(i){pendingUpload.trades[i]._editing=false;renderPreviewTable(pendingUpload.trades);}
+function deletePreviewRow(i){pendingUpload.trades.splice(i,1);renderPreviewTable(pendingUpload.trades);toast('已刪除該筆交易','info');}
+async function confirmUpload(){
   if(!pendingUpload) return;
-  pendingUpload.trades.forEach((t,i)=>{
-    const input=document.getElementById(`name-${i}`);
-    if(input) t.security_name=input.value.trim();
-  });
-  try {
+  pendingUpload.trades.forEach((t,i)=>{const inp=document.getElementById(`name-${i}`);if(inp)t.security_name=inp.value.trim();});
+  try{
     const res=await fetch(`${API}/api/confirm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pendingUpload)});
     const data=await res.json();
     if(res.ok){toast(`✅ ${data.message}`,'success');document.getElementById('preview-card').style.display='none';pendingUpload=null;}
     else toast(data.error||'儲存失敗','error');
-  } catch(e){toast('連線失敗','error');}
+  }catch(e){toast('連線失敗','error');}
 }
 function cancelUpload(){document.getElementById('preview-card').style.display='none';pendingUpload=null;}
 
 // ── History ───────────────────────────────────────────────────────────────────
-async function loadHistory() {
-  const entity = document.getElementById('filter-entity').value;
-  const broker = document.getElementById('filter-broker').value;
-  const month  = document.getElementById('filter-month').value;
-  let url = `${API}/api/transactions?limit=500`;
+async function loadHistory(){
+  const entity=document.getElementById('filter-entity').value;
+  const broker=document.getElementById('filter-broker').value;
+  let url=`${API}/api/transactions?limit=500`;
   if(entity) url+=`&entity=${encodeURIComponent(entity)}`;
   if(broker) url+=`&broker=${encodeURIComponent(broker)}`;
-  const res  = await fetch(url);
-  allHistoryTxns = await res.json();
-
-  // Populate month filter
-  const monthSel = document.getElementById('filter-month');
-  const months   = [...new Set(allHistoryTxns.map(t=>t.trade_date.slice(0,7)))].sort().reverse();
-  const curVal   = monthSel.value;
-  monthSel.innerHTML = '<option value="">全部月份</option>';
-  months.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value=m; opt.textContent=m;
-    if(m===curVal) opt.selected=true;
-    monthSel.appendChild(opt);
-  });
-
-  // Filter by month
-  let txns = allHistoryTxns;
-  if(month) txns = txns.filter(t => t.trade_date.startsWith(month));
-
+  const res=await fetch(url);
+  allHistoryTxns=await res.json();
+  const monthSel=document.getElementById('filter-month');
+  const months=[...new Set(allHistoryTxns.map(t=>t.trade_date.slice(0,7)))].sort().reverse();
+  const curVal=monthSel.value;
+  monthSel.innerHTML='<option value="">全部月份</option>';
+  months.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===curVal)o.selected=true;monthSel.appendChild(o);});
+  applyMonthFilter();
+}
+function applyMonthFilter(){
+  const month=document.getElementById('filter-month').value;
+  const txns=month?allHistoryTxns.filter(t=>t.trade_date.startsWith(month)):allHistoryTxns;
   document.getElementById('history-count').textContent=`共 ${txns.length} 筆`;
   renderHistoryTable(txns);
 }
-
-function renderHistoryTable(txns) {
+function renderHistoryTable(txns){
   const tbody=document.getElementById('history-body');
   if(!txns.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';return;}
   tbody.innerHTML=txns.map(t=>{
     const isBuy=t.shares>0;
     return `<tr>
-      <td class="left">${t.trade_date}</td>
-      <td class="left">${t.entity}</td><td class="left">${t.broker}</td>
-      <td class="left">${t.security_code||''}</td>
-      <td class="left">${t.security_name||''}</td>
+      <td class="left">${t.trade_date}</td><td class="left">${t.entity}</td><td class="left">${t.broker}</td>
+      <td class="left">${t.security_code||''}</td><td class="left">${t.security_name||''}</td>
       <td class="${isBuy?'positive':'negative'}">${Math.abs(t.shares).toLocaleString()}</td>
-      <td>${t.price?.toLocaleString()??'-'}</td>
-      <td>${t.gross_amount?.toLocaleString()??'-'}</td>
+      <td>${t.price?.toLocaleString()??'-'}</td><td>${t.gross_amount?.toLocaleString()??'-'}</td>
       <td class="${isBuy?'negative':'positive'}">${t.net_amount?.toLocaleString()??'-'}</td>
       <td class="left" style="white-space:nowrap">
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${t.id})">✏</button>
@@ -658,55 +598,50 @@ function renderHistoryTable(txns) {
 }
 
 // ── Edit Modal ────────────────────────────────────────────────────────────────
-function openEditModal(id) {
-  const t = allHistoryTxns.find(x=>x.id===id);
-  if(!t) return;
-  document.getElementById('edit-txn-id').value  = id;
-  document.getElementById('edit-date').value    = t.trade_date;
-  document.getElementById('edit-code').value    = t.security_code||'';
-  document.getElementById('edit-name').value    = t.security_name||'';
-  document.getElementById('edit-shares').value  = t.shares;
-  document.getElementById('edit-price').value   = t.price;
-  document.getElementById('edit-gross').value   = t.gross_amount;
-  document.getElementById('edit-fee').value     = t.fee;
-  document.getElementById('edit-tax').value     = t.tax;
-  document.getElementById('edit-net').value     = t.net_amount;
+function openEditModal(id){
+  const t=allHistoryTxns.find(x=>x.id===id); if(!t) return;
+  document.getElementById('edit-txn-id').value=id;
+  document.getElementById('edit-date').value=t.trade_date;
+  document.getElementById('edit-code').value=t.security_code||'';
+  document.getElementById('edit-name').value=t.security_name||'';
+  document.getElementById('edit-shares').value=t.shares;
+  document.getElementById('edit-price').value=t.price;
+  document.getElementById('edit-gross').value=t.gross_amount;
+  document.getElementById('edit-fee').value=t.fee;
+  document.getElementById('edit-tax').value=t.tax;
+  document.getElementById('edit-net').value=t.net_amount;
   document.getElementById('edit-modal').style.display='flex';
 }
-
-function closeEditModal() { document.getElementById('edit-modal').style.display='none'; }
-function closeModal(e) { if(e.target.id==='edit-modal') closeEditModal(); }
-
-async function saveEdit() {
-  const id = document.getElementById('edit-txn-id').value;
-  const payload = {
-    trade_date:   document.getElementById('edit-date').value,
+function closeEditModal(){document.getElementById('edit-modal').style.display='none';}
+function closeModal(e){if(e.target.id==='edit-modal')closeEditModal();}
+async function saveEdit(){
+  const id=document.getElementById('edit-txn-id').value;
+  const payload={
+    trade_date:document.getElementById('edit-date').value,
     security_code:document.getElementById('edit-code').value,
     security_name:document.getElementById('edit-name').value,
-    shares:       parseFloat(document.getElementById('edit-shares').value),
-    price:        parseFloat(document.getElementById('edit-price').value),
-    gross_amount: parseFloat(document.getElementById('edit-gross').value),
-    fee:          parseFloat(document.getElementById('edit-fee').value),
-    tax:          parseFloat(document.getElementById('edit-tax').value),
-    net_amount:   parseFloat(document.getElementById('edit-net').value),
+    shares:parseFloat(document.getElementById('edit-shares').value),
+    price:parseFloat(document.getElementById('edit-price').value),
+    gross_amount:parseFloat(document.getElementById('edit-gross').value),
+    fee:parseFloat(document.getElementById('edit-fee').value),
+    tax:parseFloat(document.getElementById('edit-tax').value),
+    net_amount:parseFloat(document.getElementById('edit-net').value),
   };
-  try {
-    const res = await fetch(`${API}/api/transactions/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(res.ok){ toast('✅ 已更新','success'); closeEditModal(); loadHistory(); loadHoldings(); }
+  try{
+    const res=await fetch(`${API}/api/transactions/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(res.ok){toast('✅ 已更新','success');closeEditModal();loadHistory();loadHoldings();}
     else toast('更新失敗','error');
-  } catch(e){ toast('連線失敗','error'); }
+  }catch(e){toast('連線失敗','error');}
 }
-
-async function deleteTxn(id, code, dt) {
+async function deleteTxn(id,code,dt){
   if(!confirm(`確定刪除 ${code} 在 ${dt} 的交易記錄？`)) return;
-  try {
-    const res = await fetch(`${API}/api/transactions/${id}`,{method:'DELETE'});
-    if(res.ok){ toast('✅ 已刪除','success'); loadHistory(); loadHoldings(); }
+  try{
+    const res=await fetch(`${API}/api/transactions/${id}`,{method:'DELETE'});
+    if(res.ok){toast('✅ 已刪除','success');loadHistory();loadHoldings();}
     else toast('刪除失敗','error');
-  } catch(e){ toast('連線失敗','error'); }
+  }catch(e){toast('連線失敗','error');}
 }
-
-async function exportHistory() {
+async function exportHistory(){
   const entity=document.getElementById('filter-entity').value;
   const broker=document.getElementById('filter-broker').value;
   let url=`${API}/api/transactions/export?limit=9999`;
@@ -715,16 +650,14 @@ async function exportHistory() {
   window.location=url; toast('📥 下載中...','info');
 }
 
-// ── Utils ─────────────────────────────────────────────────────────────────────
-function fmt(n){ return n==null?'-':n.toLocaleString(); }
-function fmtPnl(n){ if(n==null) return '-'; return (n>=0?'+':'')+n.toLocaleString(); }
+function fmt(n){return n==null?'-':n.toLocaleString();}
+function fmtPnl(n){if(n==null)return '-';return (n>=0?'+':'')+n.toLocaleString();}
 function toast(msg,type='info'){
   const el=document.createElement('div');
-  el.className=`toast toast-${type}`; el.textContent=msg;
+  el.className=`toast toast-${type}`;el.textContent=msg;
   document.getElementById('toast-container').appendChild(el);
   setTimeout(()=>el.remove(),4000);
 }
-
 loadHoldings();
 </script>
 </body>
