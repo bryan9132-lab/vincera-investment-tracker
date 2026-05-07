@@ -311,8 +311,11 @@ def create_app():
         limit      = int(request.args.get('limit', 100))
 
         q = Transaction.query.order_by(Transaction.trade_date.desc())
+        broker_f   = request.args.get('broker')
         if entity:
             q = q.filter_by(entity=entity)
+        if broker_f:
+            q = q.filter_by(broker=broker_f)
         if start_date:
             q = q.filter(Transaction.trade_date >= date.fromisoformat(start_date))
         if end_date:
@@ -320,6 +323,43 @@ def create_app():
 
         txns = q.limit(limit).all()
         return jsonify([t.to_dict() for t in txns])
+
+    # ── Transaction history export ──────────────────────────────────────────
+    @app.route('/api/transactions/export', methods=['GET'])
+    def export_transactions():
+        """Export transaction history as Excel"""
+        entity     = request.args.get('entity')
+        broker_f   = request.args.get('broker')
+        limit      = int(request.args.get('limit', 9999))
+        q = Transaction.query.order_by(Transaction.trade_date.desc())
+        if entity:   q = q.filter_by(entity=entity)
+        if broker_f: q = q.filter_by(broker=broker_f)
+        txns = q.limit(limit).all()
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        import tempfile
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '交易記錄'
+        headers = ['日期','帳戶','券商','帳號','代號','名稱','股數','單價','成交金額','手續費','交易稅','淨收付']
+        bold = Font(bold=True, color='FFFFFF')
+        fill = PatternFill('solid', start_color='1F4E79')
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(1, i, h)
+            c.font = bold; c.fill = fill
+            c.alignment = Alignment(horizontal='center')
+        for r, t in enumerate(txns, 2):
+            ws.cell(r,1,t.trade_date); ws.cell(r,2,t.entity); ws.cell(r,3,t.broker)
+            ws.cell(r,4,t.account_no); ws.cell(r,5,t.security_code); ws.cell(r,6,t.security_name)
+            ws.cell(r,7,t.shares); ws.cell(r,8,t.price); ws.cell(r,9,t.gross_amount)
+            ws.cell(r,10,t.fee); ws.cell(r,11,t.tax); ws.cell(r,12,t.net_amount)
+        tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+        wb.save(tmp.name)
+        label = f'{entity or "全部"}_{broker_f or "全券商"}'
+        return send_file(tmp.name, as_attachment=True,
+            download_name=f'交易記錄_{label}_{date.today().strftime("%Y%m%d")}.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # ── Securities lookup ────────────────────────────────────────────────────
     @app.route('/api/securities/lookup', methods=['GET'])
