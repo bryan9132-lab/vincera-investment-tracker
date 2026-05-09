@@ -110,14 +110,21 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
         result.errors.append('Could not find account number')
         return result
 
-    # Trade date from 交易日期: 20260505
-    date_match = re.search(r'交易日期[：:]\s*(\d{8})', text)
+    # Trade date — search across whitespace/newlines (PDF has large gaps between label and value)
+    # Try 8-digit format first: 20260505
+    date_match = re.search(r'交易日期.*?(\d{8})', text, re.DOTALL)
     if date_match:
         d = date_match.group(1)
         result.trade_date = date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     else:
-        result.errors.append('Could not find trade date')
-        return result
+        # Try 2-digit year format: 26/05/05
+        date_match2 = re.search(r'交易日期.*?(\d{2})/(\d{2})/(\d{2})', text, re.DOTALL)
+        if date_match2:
+            y, m, d_str = date_match2.groups()
+            result.trade_date = date(2000 + int(y), int(m), int(d_str))
+        else:
+            result.errors.append('Could not find trade date')
+            return result
 
     # Parse trade rows
     # Pattern: stock_code  stock_name  buy_price  shares  amount  fee  tax  net
@@ -125,7 +132,7 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
     # 買入 6949 沛爾生醫 359.50 1.000 359,500 224 0 0 0 0 0 359,724
     trade_pattern = re.compile(
         r'(賣出|買入)\s+'
-        r'(\d{4,6})\s+'          # stock code
+        r'(\w+)\s+'               # stock code (allow letters like 00981A)
         r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'  # stock name (1-2 words)
         r'([\d,\.]+)\s+'          # price
         r'([\d,\.]+)\s+'          # shares (in 張, e.g. 5.000)
