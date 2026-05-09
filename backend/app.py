@@ -23,9 +23,19 @@ def create_app():
 
     # Config
     # Railway provides postgres:// but SQLAlchemy needs postgresql://
-    db_url = os.environ.get('DATABASE_URL', 'sqlite:///sophie.db')
+    # Try multiple possible env variable names Railway might use
+    db_url = (
+        os.environ.get('DATABASE_URL') or
+        os.environ.get('DATABASE_PRIVATE_URL') or
+        os.environ.get('POSTGRES_URL') or
+        os.environ.get('POSTGRESQL_URL') or
+        'sqlite:///sophie.db'
+    )
     if db_url.startswith('postgres://'):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    # Log which DB we're using (visible in Railway logs)
+    import logging
+    logging.warning(f'VIT: Using database: {db_url[:30]}...')
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
