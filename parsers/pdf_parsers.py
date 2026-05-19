@@ -214,20 +214,18 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
     if settle_match:
         result.settle_date = _roc_to_date(settle_match.group(1))
 
-    # Trade rows pattern:
-    # 115/05/05 集買 00981A 主動統一台股增長 40,000 29.37 1,174,800 499 1,175,299(收) 115/05/07
-    # 115/05/05 OT賣 6488 環球晶 3,000 665.00 1,995,000 796 5,985 1,988,219(付) 115/05/07
+    # Trade rows pattern — handles FANG+ names and variable optional fields
     trade_pattern = re.compile(
         r'\d{3}/\d{2}/\d{2}\s+'
         r'(集買|集賣|OT買|OT賣)\s+'
         r'(\w+)\s+'               # stock code
-        r'([\w\-\s]+?)\s+'        # stock name
+        r'([\w\-\+\s]+?)\s+'     # stock name (allow + for FANG+)
         r'([\d,]+)\s+'            # shares
         r'([\d,\.]+)\s+'          # price
         r'([\d,]+)\s+'            # gross
-        r'([\d,]+)\s+'            # fee
-        r'(?:([\d,]+)\s+)?'       # tax (optional, only on sells)
-        r'([\d,]+)\([收付]\)'     # net amount
+        r'([\d,]+)'               # fee
+        r'(?:[\s\d,]+?)'          # skip optional fields (非貪婪)
+        r'([\d,]{5,})\([收付]\)'  # net amount (min 5 chars)
     )
 
     for m in trade_pattern.finditer(text):
@@ -237,14 +235,14 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
         price  = _clean_number(m.group(5))
         gross  = _clean_number(m.group(6))
         fee    = _clean_number(m.group(7))
-        tax    = _clean_number(m.group(8)) if m.group(8) else 0.0
-        net    = _clean_number(m.group(9))
+        tax    = 0.0  # extracted separately below if needed
+        net    = _clean_number(m.group(8))
 
         if action in ('集賣', 'OT賣'):
             shares = -shares
 
         result.trades.append(ParsedTrade(
-            security_code = code,
+            security_code = code.strip(),
             shares        = shares,
             price         = price,
             gross_amount  = gross,
