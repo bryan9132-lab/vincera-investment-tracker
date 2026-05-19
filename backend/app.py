@@ -82,15 +82,24 @@ def create_app():
             }), 422
 
         # Check for duplicate upload
+        force    = request.form.get('force', 'false').lower() == 'true'
         existing = UploadLog.query.filter_by(
             account_no = parsed.account_no,
             trade_date = parsed.trade_date,
         ).first()
-        if existing and existing.status == 'confirmed':
+        if existing and existing.status == 'confirmed' and not force:
             return jsonify({
-                'error': 'Duplicate upload',
-                'details': [f'Transactions for {parsed.account_no} on {parsed.trade_date} already confirmed.']
-            }), 409
+                'warning': 'duplicate',
+                'message': f'{parsed.account_no} 在 {parsed.trade_date} 的交易已上傳過。確定要再次上傳嗎？',
+                'account_no':  parsed.account_no,
+                'entity':      mapping['entity'],
+                'broker':      parsed.broker,
+                'trade_date':  parsed.trade_date.isoformat(),
+                'settle_date': parsed.settle_date.isoformat() if parsed.settle_date else None,
+                'trades':      [],
+                'unknown_codes': [],
+                'warnings':    [],
+            }), 200
 
         # Enrich with known security names
         trades_preview = []
@@ -237,6 +246,87 @@ def create_app():
             download_name=f'庫存總表_{date.today().strftime("%Y%m%d")}.xlsx',
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
+
+    # ── Manual transaction entry ────────────────────────────────────────────
+    @app.route('/api/manual_entry', methods=['POST'])
+    def manual_entry():
+        """
+        Preview manually entered transactions (same flow as PDF upload).
+        Accepts JSON with account_no, trade_date, and trades list.
+        """
+        data       = request.json
+        account_no = data.get('account_no', '').strip()
+        trade_date_str = data.get('trade_date', '')
+        trades_raw = data.get('trades', [])
+        force      = data.get('force', False)
+
+        mapping = ACCOUNT_MAP.get(account_no)
+        if not mapping:
+            return jsonify({'error': f'未知帳號：{account_no}'}), 422
+
+        try:
+            trade_date = date.fromisoformat(trade_date_str)
+        except Exception:
+            return jsonify({'error': '日期格式錯誤'}), 422
+
+        # Duplicate check
+        existing = UploadLog.query.filter_by(
+            account_no=account_no,
+            trade_date=trade_date,
+        ).first()
+        if existing and existing.status == 'confirmed' and not force:
+            return jsonify({
+                'warning': 'duplicate',
+                'message': f'{account_no} 在 {trade_date} 的交易已上傳過。確定要再次上傳嗎？',
+                'account_no': account_no, 'entity': mapping['entity'],
+                'broker': mapping['broker'],
+                'trade_date': trade_date.isoformat(), 'settle_date': None,
+                'trades': [], 'unknown_codes': [], 'warnings': [],
+            }), 200
+
+        # Enrich trades with security names
+        trades_preview = []
+        unknown_codes  = []
+        for t in trades_raw:
+            code = str(t.get('security_code', '')).strip()
+            sec  = Security.query.get(code)
+            name = sec.name if sec else fetch_twse_name(code)
+            if not name:
+                unknown_codes.append(code)
+                name = f'[Unknown: {code}]'
+            elif sec and not sec.name:
+                sec.name = name
+
+            shares = float(t.get('shares', 0))
+            price  = float(t.get('price', 0))
+            gross  = abs(shares) * price
+            fee    = round(gross * 0.001425 * 0.6)  # ~0.1425% discounted rate
+            tax    = round(gross * 0.003) if shares < 0 else 0
+            net    = gross - fee - tax
+
+            trades_preview.append({
+                'security_code':  code,
+                'security_name':  t.get('security_name', name),
+                'name_confirmed': bool(sec and sec.name),
+                'shares':         shares,
+                'price':          price,
+                'gross_amount':   round(gross),
+                'fee':            int(t.get('fee', fee)),
+                'tax':            int(t.get('tax', tax)),
+                'net_amount':     round(net),
+            })
+
+        return jsonify({
+            'account_no':    account_no,
+            'entity':        mapping['entity'],
+            'broker':        mapping['broker'],
+            'trade_date':    trade_date.isoformat(),
+            'settle_date':   None,
+            'trades':        trades_preview,
+            'unknown_codes': unknown_codes,
+            'warnings':      [],
+            'source':        'manual',
+        })
 
     # ── One-time migration endpoint ──────────────────────────────────────────
     @app.route('/api/migrate', methods=['POST'])

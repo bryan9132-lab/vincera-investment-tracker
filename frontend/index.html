@@ -184,13 +184,71 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
 
   <!-- ── Tab: Upload ── -->
   <div class="tab-panel" id="tab-upload">
-    <div class="card">
-      <div class="card-title">上傳交易 PDF</div>
-      <div class="upload-zone" id="upload-zone">
-        <input type="file" id="file-input" accept=".pdf" onchange="handleFileSelect(this)">
-        <div class="upload-icon">📂</div>
-        <div class="upload-label">拖曳或點擊選擇 PDF</div>
-        <div class="upload-hint">支援：國泰、統一、元大　每次一個檔案</div>
+    <!-- Mode selector -->
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      <button class="btn btn-primary" id="mode-pdf-btn" onclick="setUploadMode('pdf')">📂 上傳 PDF</button>
+      <button class="btn btn-ghost" id="mode-manual-btn" onclick="setUploadMode('manual')">✏ 手動輸入</button>
+    </div>
+
+    <!-- PDF mode -->
+    <div id="pdf-mode">
+      <div class="card">
+        <div class="card-title">上傳交易 PDF</div>
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept=".pdf" onchange="handleFileSelect(this)">
+          <div class="upload-icon">📂</div>
+          <div class="upload-label">拖曳或點擊選擇 PDF</div>
+          <div class="upload-hint">支援：國泰、統一、元大　每次一個檔案</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual mode -->
+    <div id="manual-mode" style="display:none">
+      <div class="card">
+        <div class="card-title">手動輸入交易</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+          <div class="modal-field">
+            <label>帳戶</label>
+            <select id="manual-account" class="filter-select" style="width:100%" onchange="onManualAccountChange()">
+              <option value="">請選擇帳戶</option>
+              <option value="600826">RC — 統一 (600826)</option>
+              <option value="133376">RC — 元大 (133376)</option>
+              <option value="600885">華強 — 統一 (600885)</option>
+              <option value="133311">華強 — 元大 (133311)</option>
+              <option value="006439">私銀RC — 國泰 (006439)</option>
+              <option value="007065">私銀華強 — 國泰 (007065)</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label>交易日期</label>
+            <input type="date" id="manual-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+          </div>
+          <div class="modal-field">
+            <label>券商</label>
+            <input type="text" id="manual-broker" readonly style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:var(--font);font-size:13px;padding:8px 10px">
+          </div>
+        </div>
+
+        <!-- Stock rows -->
+        <table style="margin-bottom:12px">
+          <thead><tr>
+            <th class="left">股票代號</th>
+            <th class="left">股票名稱</th>
+            <th class="left">買/賣</th>
+            <th>股數</th>
+            <th>單價</th>
+            <th>手續費</th>
+            <th>交易稅</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="manual-trades-body"></tbody>
+        </table>
+        <button class="btn btn-ghost btn-sm" onclick="addManualRow()">＋ 新增股票</button>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="previewManual()">預覽交易</button>
+        </div>
       </div>
     </div>
     <div class="card" id="preview-card" style="display:none">
@@ -451,9 +509,44 @@ async function uploadFile(file) {
     const res=await fetch(`${API}/api/upload`,{method:'POST',body:formData});
     const data=await res.json();
     if(!res.ok){toast(data.error||'上傳失敗','error');resetUploadZone();return;}
+    if(data.warning==='duplicate'){
+      resetUploadZone();
+      showDuplicateWarning(data.message, ()=>uploadFileForce(file));
+      return;
+    }
     pendingUpload={...data,filename:file.name};
     showPreview(data);
   } catch(e){toast('連線失敗','error');resetUploadZone();}
+}
+
+async function uploadFileForce(file) {
+  zone.querySelector('.upload-label').textContent=`解析中：${file.name}`;
+  zone.querySelector('.upload-icon').innerHTML='<div class="spinner"></div>';
+  const formData=new FormData(); formData.append('file',file); formData.append('force','true');
+  try {
+    const res=await fetch(`${API}/api/upload`,{method:'POST',body:formData});
+    const data=await res.json();
+    if(!res.ok){toast(data.error||'上傳失敗','error');resetUploadZone();return;}
+    pendingUpload={...data,filename:file.name};
+    showPreview(data);
+  } catch(e){toast('連線失敗','error');resetUploadZone();}
+}
+
+function showDuplicateWarning(message, onConfirm) {
+  const existing = document.getElementById('duplicate-warning');
+  if(existing) existing.remove();
+  const div = document.createElement('div');
+  div.id = 'duplicate-warning';
+  div.className = 'warning-box';
+  div.style.cssText = 'margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px';
+  div.innerHTML = `
+    <span>⚠ ${message}</span>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button class="btn btn-danger btn-sm" id="dup-confirm-btn">強制上傳</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('duplicate-warning').remove()">取消</button>
+    </div>`;
+  document.getElementById('pdf-mode').querySelector('.card').appendChild(div);
+  document.getElementById('dup-confirm-btn').onclick = () => { div.remove(); onConfirm(); };
 }
 function resetUploadZone(){
   zone.querySelector('.upload-label').textContent='拖曳或點擊選擇 PDF';
@@ -648,6 +741,109 @@ async function exportHistory(){
   if(entity) url+=`&entity=${encodeURIComponent(entity)}`;
   if(broker) url+=`&broker=${encodeURIComponent(broker)}`;
   window.location=url; toast('📥 下載中...','info');
+}
+
+// ── Upload mode switching ─────────────────────────────────────────────────────
+function setUploadMode(mode) {
+  document.getElementById('pdf-mode').style.display    = mode==='pdf'    ? 'block' : 'none';
+  document.getElementById('manual-mode').style.display = mode==='manual' ? 'block' : 'none';
+  document.getElementById('mode-pdf-btn').className    = mode==='pdf'    ? 'btn btn-primary' : 'btn btn-ghost';
+  document.getElementById('mode-manual-btn').className = mode==='manual' ? 'btn btn-primary' : 'btn btn-ghost';
+}
+
+const ACCOUNT_BROKER_MAP = {
+  '600826':{entity:'RC',broker:'統一'},'133376':{entity:'RC',broker:'元大'},
+  '600885':{entity:'華強',broker:'統一'},'133311':{entity:'華強',broker:'元大'},
+  '006439':{entity:'私銀RC',broker:'國泰'},'007065':{entity:'私銀華強',broker:'國泰'},
+};
+let manualRowCount = 0;
+
+function onManualAccountChange() {
+  const acct = document.getElementById('manual-account').value;
+  const info = ACCOUNT_BROKER_MAP[acct];
+  document.getElementById('manual-broker').value = info ? info.broker : '';
+}
+
+function addManualRow() {
+  const i = manualRowCount++;
+  const tbody = document.getElementById('manual-trades-body');
+  const tr = document.createElement('tr');
+  tr.id = `manual-row-${i}`;
+  tr.innerHTML = `
+    <td class="left"><input class="edit-input" style="width:90px" id="mr-code-${i}" placeholder="e.g. 6682" onblur="lookupManualName(${i})"></td>
+    <td class="left"><input class="name-input" id="mr-name-${i}" placeholder="股票名稱"></td>
+    <td class="left"><select class="filter-select" id="mr-dir-${i}" style="padding:5px 8px;font-size:12px"><option value="1">買入</option><option value="-1">賣出</option></select></td>
+    <td><input class="edit-input" id="mr-shares-${i}" placeholder="張數" oninput="calcManualFee(${i})"></td>
+    <td><input class="edit-input" id="mr-price-${i}" placeholder="單價" oninput="calcManualFee(${i})"></td>
+    <td><input class="edit-input" id="mr-fee-${i}" placeholder="手續費"></td>
+    <td><input class="edit-input" id="mr-tax-${i}" placeholder="交易稅"></td>
+    <td><button class="btn btn-danger btn-sm" onclick="document.getElementById('manual-row-${i}').remove()">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+async function lookupManualName(i) {
+  const code = document.getElementById(`mr-code-${i}`)?.value?.trim();
+  if(!code) return;
+  const nameInput = document.getElementById(`mr-name-${i}`);
+  if(nameInput.value) return;
+  try {
+    const res = await fetch(`${API}/api/securities/lookup?code=${code}`);
+    const data = await res.json();
+    if(data.name) nameInput.value = data.name;
+  } catch(e) {}
+}
+
+function calcManualFee(i) {
+  const zhang  = parseFloat(document.getElementById(`mr-shares-${i}`)?.value || 0);
+  const price  = parseFloat(document.getElementById(`mr-price-${i}`)?.value || 0);
+  const dir    = parseInt(document.getElementById(`mr-dir-${i}`)?.value || 1);
+  if(!zhang || !price) return;
+  const gross = zhang * 1000 * price;
+  document.getElementById(`mr-fee-${i}`).value = Math.round(gross * 0.001425 * 0.6);
+  document.getElementById(`mr-tax-${i}`).value = dir < 0 ? Math.round(gross * 0.003) : 0;
+}
+
+async function previewManual() {
+  const account_no = document.getElementById('manual-account').value;
+  const trade_date = document.getElementById('manual-date').value;
+  if(!account_no) { toast('請選擇帳戶','error'); return; }
+  if(!trade_date) { toast('請選擇交易日期','error'); return; }
+  const trades = [];
+  document.querySelectorAll('[id^="manual-row-"]').forEach(row => {
+    const i = row.id.split('-')[2];
+    const code   = document.getElementById(`mr-code-${i}`)?.value?.trim();
+    const name   = document.getElementById(`mr-name-${i}`)?.value?.trim();
+    const dir    = parseInt(document.getElementById(`mr-dir-${i}`)?.value || 1);
+    const zhang  = parseFloat(document.getElementById(`mr-shares-${i}`)?.value || 0);
+    const price  = parseFloat(document.getElementById(`mr-price-${i}`)?.value || 0);
+    const fee    = parseFloat(document.getElementById(`mr-fee-${i}`)?.value || 0);
+    const tax    = parseFloat(document.getElementById(`mr-tax-${i}`)?.value || 0);
+    if(!code || !zhang || !price) return;
+    trades.push({security_code:code, security_name:name, shares:zhang*1000*dir, price, fee, tax});
+  });
+  if(!trades.length) { toast('請至少輸入一筆交易','error'); return; }
+  await submitManualEntry(account_no, trade_date, trades, false);
+}
+
+async function submitManualEntry(account_no, trade_date, trades, force) {
+  try {
+    const res = await fetch(`${API}/api/manual_entry`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_no, trade_date, trades, force})
+    });
+    const data = await res.json();
+    if(data.warning==='duplicate') {
+      if(!confirm(`${data.message}\n\n確定強制上傳？`)) return;
+      await submitManualEntry(account_no, trade_date, trades, true);
+      return;
+    }
+    if(!res.ok){ toast(data.error||'錯誤','error'); return; }
+    pendingUpload={...data, filename:'manual'};
+    setUploadMode('pdf');
+    document.getElementById('pdf-mode').style.display='none';
+    showPreview(data);
+    document.getElementById('preview-card').style.display='block';
+  } catch(e){ toast('連線失敗','error'); }
 }
 
 function fmt(n){return n==null?'-':n.toLocaleString();}
