@@ -11,7 +11,10 @@ from flask_cors import CORS
 from datetime import datetime, date
 import tempfile
 
-from backend.models import db, Transaction, Position, Security, UploadLog, ACCOUNT_MAP
+from backend.models import (db, Transaction, Position, Security, UploadLog,
+                            ACCOUNT_MAP, CASH_ACCOUNTS, CASH_ACCOUNT_BROKER_MAP,
+                            FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
+                            CashAccount, CashEntry, FundEntry)
 from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
@@ -45,6 +48,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _seed_securities()
+        _seed_cash_accounts()
 
     # ── Serve frontend ───────────────────────────────────────────────────────
     @app.route('/')
@@ -201,6 +205,34 @@ def create_app():
 
         # Recalculate positions for this entity
         recalculate_positions(mapping['entity'])
+
+        # ── Auto-update cash balance for investment account ───────────────
+        cash_acct_id = CASH_ACCOUNT_BROKER_MAP.get(account_no)
+        if cash_acct_id:
+            cash_acct = CashAccount.query.get(cash_acct_id)
+            if cash_acct and not cash_acct.is_static:
+                saved_txns = Transaction.query.filter_by(
+                    account_no = account_no,
+                    trade_date = trade_date,
+                ).all()
+                for txn in saved_txns:
+                    is_buy        = txn.shares > 0
+                    cash_amount   = -txn.net_amount if is_buy else txn.net_amount
+                    cash_acct.balance += cash_amount
+                    ce = CashEntry(
+                        account_id     = cash_acct_id,
+                        entry_date     = trade_date,
+                        entry_type     = '買入股票' if is_buy else '賣出股票',
+                        description    = txn.security_name or txn.security_code or '',
+                        amount         = cash_amount,
+                        balance_after  = cash_acct.balance,
+                        security_code  = txn.security_code,
+                        security_name  = txn.security_name,
+                        transaction_id = txn.id,
+                        is_auto        = True,
+                    )
+                    db.session.add(ce)
+                db.session.commit()
 
         return jsonify({'status': 'ok', 'message': f'Saved {len(trades)} transactions'})
 
@@ -518,7 +550,370 @@ def create_app():
 
         return jsonify({'code': code, 'name': None, 'source': None}), 404
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # Cash routes
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ── 資金總表 ─────────────────────────────────────────────────────────────
+    @app.route('/api/cash/accounts', methods=['GET'])
+    def get_cash_accounts():
+        """Return all cash accounts with current balances, optionally filtered."""
+        entity   = request.args.get('entity')
+        category = request.args.get('category')
+
+        q = CashAccount.query.order_by(CashAccount.sort_order)
+        if entity:
+            q = q.filter_by(entity=entity)
+        if category:
+            q = q.filter_by(category=category)
+
+        accounts = q.all()
+        return jsonify([a.to_dict() for a in accounts])
+
+    # ── 資金細項記錄 ─────────────────────────────────────────────────────────
+    @app.route('/api/cash/entries', methods=['GET'])
+    def get_cash_entries():
+        """Return cash ledger entries, optionally filtered."""
+        account_id = request.args.get('account_id')
+        entity     = request.args.get('entity')
+        start      = request.args.get('start')
+        end        = request.args.get('end')
+        limit      = int(request.args.get('limit', 200))
+
+        q = CashEntry.query.order_by(CashEntry.entry_date.desc(), CashEntry.id.desc())
+
+        if account_id:
+            q = q.filter_by(account_id=account_id)
+        elif entity:
+            acct_ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
+            q = q.filter(CashEntry.account_id.in_(acct_ids))
+        if start:
+            q = q.filter(CashEntry.entry_date >= date.fromisoformat(start))
+        if end:
+            q = q.filter(CashEntry.entry_date <= date.fromisoformat(end))
+
+        entries = q.limit(limit).all()
+        return jsonify([e.to_dict() for e in entries])
+
+    # ── Manual cash entry ────────────────────────────────────────────────────
+    @app.route('/api/cash/entry', methods=['POST'])
+    def add_cash_entry():
+        """Add a manual cash entry. Handles transfers, loans, and simple entries."""
+        data         = request.json
+        account_id   = data.get('account_id', '').strip()
+        entry_date   = date.fromisoformat(data['entry_date'])
+        entry_type   = data.get('entry_type', '').strip()
+        description  = data.get('description', '').strip()
+        amount       = float(data['amount'])   # positive=in, negative=out
+
+        acct = CashAccount.query.get(account_id)
+        if not acct:
+            return jsonify({'error': f'找不到帳戶：{account_id}'}), 404
+        if acct.is_static:
+            return jsonify({'error': '靜態帳戶請直接更新餘額'}), 400
+
+        # ── Validation ────────────────────────────────────────────────────
+        if entry_type == '轉出賬戶':
+            target_id = data.get('target_account_id', '').strip()
+            if not target_id:
+                return jsonify({'error': '請指定轉入帳戶'}), 400
+            target = CashAccount.query.get(target_id)
+            if not target:
+                return jsonify({'error': f'找不到轉入帳戶：{target_id}'}), 404
+            if acct.entity != target.entity:
+                return jsonify({'error': '轉出賬戶只限同一實體（RC↔RC 或 華強↔華強）。跨實體請用借款'}), 400
+
+        elif entry_type in ('借款', '借款還款'):
+            target_id = data.get('target_account_id', '').strip()
+            if not target_id:
+                return jsonify({'error': '請指定對方帳戶'}), 400
+            target = CashAccount.query.get(target_id)
+            if not target:
+                return jsonify({'error': f'找不到對方帳戶：{target_id}'}), 404
+            if acct.entity == target.entity:
+                return jsonify({'error': '借款只限跨實體（RC↔華強）'}), 400
+
+        elif entry_type in ('貸款', '貸款還款'):
+            if 'private' not in acct.id:
+                return jsonify({'error': '貸款功能只限私銀帳戶'}), 400
+
+        try:
+            if entry_type in ('轉出賬戶', '借款', '借款還款'):
+                target  = CashAccount.query.get(data['target_account_id'])
+                out_amt = -abs(amount)
+                in_amt  =  abs(amount)
+
+                acct.balance += out_amt
+                e_out = CashEntry(
+                    account_id    = account_id,
+                    entry_date    = entry_date,
+                    entry_type    = entry_type,
+                    description   = description or f'轉入{target.name}',
+                    amount        = out_amt,
+                    balance_after = acct.balance,
+                )
+                db.session.add(e_out)
+                db.session.flush()
+
+                target.balance += in_amt
+                e_in = CashEntry(
+                    account_id      = target.id,
+                    entry_date      = entry_date,
+                    entry_type      = entry_type,
+                    description     = description or f'來自{acct.name}',
+                    amount          = in_amt,
+                    balance_after   = target.balance,
+                    linked_entry_id = e_out.id,
+                )
+                db.session.add(e_in)
+                db.session.flush()
+                e_out.linked_entry_id = e_in.id
+
+                db.session.commit()
+                return jsonify({'status': 'ok', 'entry_id': e_out.id, 'mirror_id': e_in.id})
+
+            else:
+                acct.balance += amount
+                entry = CashEntry(
+                    account_id    = account_id,
+                    entry_date    = entry_date,
+                    entry_type    = entry_type,
+                    description   = description,
+                    amount        = amount,
+                    balance_after = acct.balance,
+                )
+                db.session.add(entry)
+                db.session.commit()
+                return jsonify({'status': 'ok', 'entry_id': entry.id})
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
+    # ── Delete cash entry ────────────────────────────────────────────────────
+    @app.route('/api/cash/entry/<int:entry_id>', methods=['DELETE'])
+    def delete_cash_entry(entry_id):
+        """Delete a cash entry and its mirror (if linked). Recalculates balances."""
+        entry = CashEntry.query.get_or_404(entry_id)
+
+        to_delete = [entry]
+        if entry.linked_entry_id:
+            mirror = CashEntry.query.get(entry.linked_entry_id)
+            if mirror:
+                to_delete.append(mirror)
+
+        affected = set(e.account_id for e in to_delete)
+
+        try:
+            for e in to_delete:
+                db.session.delete(e)
+            db.session.flush()
+            for acct_id in affected:
+                _recalculate_cash_balance(acct_id)
+            db.session.commit()
+            return jsonify({'status': 'ok'})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
+    # ── Edit cash entry ──────────────────────────────────────────────────────
+    @app.route('/api/cash/entry/<int:entry_id>', methods=['PUT'])
+    def edit_cash_entry(entry_id):
+        """Edit a manual cash entry (not auto-generated)."""
+        entry = CashEntry.query.get_or_404(entry_id)
+        if entry.is_auto:
+            return jsonify({'error': '自動產生的記錄不能手動編輯'}), 400
+
+        data = request.json
+        try:
+            if 'entry_date'   in data: entry.entry_date  = date.fromisoformat(data['entry_date'])
+            if 'description'  in data: entry.description = data['description']
+            if 'amount'       in data: entry.amount      = float(data['amount'])
+            db.session.flush()
+            _recalculate_cash_balance(entry.account_id)
+            db.session.commit()
+            return jsonify({'status': 'ok'})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
+    # ── Update static account balance ────────────────────────────────────────
+    @app.route('/api/cash/static_balance', methods=['PUT'])
+    def update_static_balance():
+        """Directly update balance for static accounts (其他, 富邦建國, 元大銀行)."""
+        data       = request.json
+        account_id = data.get('account_id', '').strip()
+        balance    = float(data['balance'])
+
+        acct = CashAccount.query.get(account_id)
+        if not acct:
+            return jsonify({'error': f'找不到帳戶：{account_id}'}), 404
+        if not acct.is_static:
+            return jsonify({'error': '此帳戶不是靜態帳戶'}), 400
+
+        try:
+            acct.balance = balance
+            db.session.commit()
+            return jsonify({'status': 'ok', 'balance': balance})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
+    # ── Fund entry (申購/贖回基金) ────────────────────────────────────────────
+    @app.route('/api/cash/fund_entry', methods=['POST'])
+    def add_fund_entry():
+        """
+        申購: Sophie fills entry_date, unit_cost, units
+        贖回: Sophie fills entry_date, units (negative), redemption_amount
+        Auto-creates linked CashEntry on the private account.
+        """
+        data        = request.json
+        account_id  = data.get('account_id', '').strip()
+        action      = data.get('action', '').strip()
+        entry_date  = date.fromisoformat(data['entry_date'])
+
+        fund_acct = CashAccount.query.get(account_id)
+        if not fund_acct or fund_acct.category != '基金投資':
+            return jsonify({'error': '無效的基金帳戶'}), 400
+
+        linked_cash_id = FUND_CASH_LINK.get(account_id)
+        cash_acct = CashAccount.query.get(linked_cash_id)
+        if not cash_acct:
+            return jsonify({'error': '找不到連結的現金帳戶'}), 500
+
+        prev = FundEntry.query.filter_by(account_id=account_id)\
+                              .order_by(FundEntry.id.desc()).first()
+        prev_cum_amount = prev.cumulative_amount if prev else 0
+        prev_cum_units  = prev.cumulative_units  if prev else 0
+        prev_avg        = prev.avg_unit_cost      if prev else None
+
+        try:
+            if action == '申購':
+                unit_cost  = float(data['unit_cost'])
+                units      = float(data['units'])
+                cost       = round(unit_cost * units)
+                cum_amount = prev_cum_amount + cost
+                cum_units  = prev_cum_units  + units
+                avg        = cum_amount / cum_units if cum_units else None
+
+                fe = FundEntry(
+                    account_id        = account_id,
+                    entry_date        = entry_date,
+                    cost              = cost,
+                    unit_cost         = unit_cost,
+                    units             = units,
+                    cumulative_amount = cum_amount,
+                    cumulative_units  = cum_units,
+                    avg_unit_cost     = avg,
+                )
+                db.session.add(fe)
+
+                cash_acct.balance -= cost
+                ce = CashEntry(
+                    account_id    = linked_cash_id,
+                    entry_date    = entry_date,
+                    entry_type    = '申購基金',
+                    description   = f'申購{fund_acct.name}',
+                    amount        = -cost,
+                    balance_after = cash_acct.balance,
+                )
+                db.session.add(ce)
+                db.session.flush()
+                fe.linked_cash_entry_id = ce.id
+                fund_acct.balance = cum_amount
+
+                db.session.commit()
+                return jsonify({'status': 'ok', 'cost': cost, 'cum_amount': cum_amount})
+
+            elif action == '贖回':
+                units             = float(data['units'])
+                redemption_amount = float(data['redemption_amount'])
+                unit_cost         = prev_avg
+                cost              = round(unit_cost * units) if unit_cost else 0
+                profit            = round(redemption_amount - abs(cost))
+                cum_amount        = prev_cum_amount + cost
+                cum_units         = prev_cum_units  + units
+                avg               = (cum_amount / cum_units) if cum_units and cum_units > 0 else None
+
+                fe = FundEntry(
+                    account_id        = account_id,
+                    entry_date        = entry_date,
+                    cost              = cost,
+                    unit_cost         = unit_cost,
+                    units             = units,
+                    cumulative_amount = cum_amount,
+                    cumulative_units  = cum_units,
+                    avg_unit_cost     = avg,
+                    redemption_amount = redemption_amount,
+                    profit            = profit,
+                )
+                db.session.add(fe)
+
+                cost_return = abs(cost)
+                cash_acct.balance += cost_return
+                ce1 = CashEntry(
+                    account_id    = linked_cash_id,
+                    entry_date    = entry_date,
+                    entry_type    = '贖回基金',
+                    description   = f'贖回{fund_acct.name}－成本',
+                    amount        = cost_return,
+                    balance_after = cash_acct.balance,
+                )
+                db.session.add(ce1)
+
+                cash_acct.balance += profit
+                ce2 = CashEntry(
+                    account_id    = linked_cash_id,
+                    entry_date    = entry_date,
+                    entry_type    = '贖回基金',
+                    description   = f'贖回{fund_acct.name}－處分利益',
+                    amount        = profit,
+                    balance_after = cash_acct.balance,
+                )
+                db.session.add(ce2)
+                db.session.flush()
+                fe.linked_cash_entry_id = ce1.id
+                fund_acct.balance = cum_amount
+
+                db.session.commit()
+                return jsonify({'status': 'ok', 'redemption_amount': redemption_amount,
+                                'profit': profit, 'cum_amount': cum_amount})
+
+            else:
+                return jsonify({'error': '無效的 action，請用 申購 或 贖回'}), 400
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
+    # ── Fund entries list ────────────────────────────────────────────────────
+    @app.route('/api/cash/fund_entries', methods=['GET'])
+    def get_fund_entries():
+        account_id = request.args.get('account_id')
+        q = FundEntry.query.order_by(FundEntry.entry_date, FundEntry.id)
+        if account_id:
+            q = q.filter_by(account_id=account_id)
+        return jsonify([e.to_dict() for e in q.all()])
+
     return app
+
+
+# ── Helper: recalculate running balance for a cash account ─────────────────
+def _recalculate_cash_balance(account_id):
+    """
+    Recompute balance_after for all CashEntry rows in chronological order,
+    then sync CashAccount.balance. Called after delete or edit.
+    """
+    acct = CashAccount.query.get(account_id)
+    if not acct or acct.is_static:
+        return
+    entries = CashEntry.query.filter_by(account_id=account_id)\
+                             .order_by(CashEntry.entry_date, CashEntry.id).all()
+    running = acct.opening_balance
+    for e in entries:
+        running += e.amount
+        e.balance_after = running
+    acct.balance = running
 
 
 def _seed_securities():
@@ -541,6 +936,24 @@ def _seed_securities():
     for code, name in known.items():
         if not Security.query.get(code):
             db.session.add(Security(code=code, name=name))
+    db.session.commit()
+
+
+def _seed_cash_accounts():
+    """Create CashAccount rows from config if they don't exist yet."""
+    for i, cfg in enumerate(CASH_ACCOUNTS):
+        if not CashAccount.query.get(cfg['id']):
+            db.session.add(CashAccount(
+                id              = cfg['id'],
+                entity          = cfg['entity'],
+                name            = cfg['name'],
+                category        = cfg['category'],
+                bank            = cfg.get('bank'),
+                opening_balance = cfg['opening_balance'],
+                balance         = cfg['opening_balance'],
+                is_static       = cfg['is_static'],
+                sort_order      = i,
+            ))
     db.session.commit()
 
 
