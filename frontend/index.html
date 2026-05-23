@@ -124,6 +124,47 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
 .toast-error{background:#7f1d1d;color:#fee2e2;border:1px solid #dc2626}
 .toast-info{background:#1e3a5f;color:#bfdbfe;border:1px solid #3b82f6}
 @keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
+/* Cash summary */
+.cash-entity-section{margin-bottom:28px}
+.cash-entity-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.cash-entity-title::before{content:'';display:inline-block;width:3px;height:14px;background:var(--accent2);border-radius:2px}
+.cash-account-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:8px}
+.cash-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:border-color .15s}
+.cash-card:hover{border-color:var(--accent)}
+.cash-card-name{font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cash-card-cat{font-size:11px;color:var(--muted);margin-bottom:10px}
+.cash-card-balance{font-size:20px;font-weight:700;font-family:var(--mono)}
+.cash-card-bank{font-size:11px;color:var(--muted);margin-top:4px}
+.cash-card.static{border-style:dashed}
+.cash-totals{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;gap:24px;font-size:13px;margin-bottom:20px;flex-wrap:wrap}
+.cash-totals-item label{color:var(--muted);margin-right:6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.cash-totals-item strong{font-family:var(--mono);font-weight:700}
+/* Cash filter bar */
+.cash-filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+/* Loan matrix */
+.loan-matrix{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:20px}
+.loan-matrix table{width:auto;min-width:300px}
+.loan-matrix th,.loan-matrix td{padding:8px 20px;text-align:right;font-size:13px}
+.loan-matrix th.left,.loan-matrix td.left{text-align:left}
+/* Cash ledger toolbar */
+.ledger-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+/* Entry type badge */
+.etype{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.etype-buy{background:rgba(248,113,113,.15);color:var(--danger)}
+.etype-sell{background:rgba(110,231,183,.15);color:var(--accent2)}
+.etype-transfer{background:rgba(79,142,247,.15);color:var(--accent)}
+.etype-fund{background:rgba(251,191,36,.15);color:var(--warn)}
+.etype-loan{background:rgba(167,139,250,.15);color:#a78bfa}
+.etype-other{background:rgba(148,163,184,.15);color:var(--muted)}
+/* Cash entry modal */
+.modal-section{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:16px 0 10px;border-top:1px solid var(--border);padding-top:12px}
+/* Fund ledger table */
+.fund-table th,.fund-table td{padding:7px 10px;font-size:12px}
+.fund-table{width:100%;border-collapse:collapse}
+.fund-table th{background:var(--surface2);color:var(--muted);font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);text-align:right}
+.fund-table th.left{text-align:left}
+.fund-table td{border-bottom:1px solid var(--border);font-family:var(--mono);text-align:right}
+.fund-table td.left{font-family:var(--font);text-align:left}
 </style>
 </head>
 <body>
@@ -136,6 +177,8 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="tab active" onclick="switchTab('holdings')">📊 庫存總表</div>
     <div class="tab" onclick="switchTab('upload')">📄 上傳交易</div>
     <div class="tab" onclick="switchTab('history')">📋 交易記錄</div>
+    <div class="tab" onclick="switchTab('cashsummary')">💰 資金總表</div>
+    <div class="tab" onclick="switchTab('cashledger')">📒 資金細項</div>
   </div>
 
   <!-- ── Tab: Holdings ── -->
@@ -304,7 +347,177 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
   </div>
 </div>
 
-<!-- Edit Modal -->
+  <!-- ── Tab: Cash Summary 資金總表 ── -->
+  <div class="tab-panel" id="tab-cashsummary">
+    <!-- Filter bar -->
+    <div class="cash-filter-bar">
+      <select id="cash-filter-entity" class="filter-select" onchange="loadCashSummary()">
+        <option value="">RC + 華強</option>
+        <option value="RC">RC</option>
+        <option value="華強">華強</option>
+      </select>
+      <select id="cash-filter-cat" class="filter-select" onchange="loadCashSummary()">
+        <option value="">全部類別</option>
+        <option value="股票投資">股票投資</option>
+        <option value="基金投資">基金投資</option>
+        <option value="非投資">非投資</option>
+      </select>
+    </div>
+
+    <!-- Loan matrix -->
+    <div class="loan-matrix" id="loan-matrix">
+      <div class="card-title" style="margin-bottom:12px">借貸概覽</div>
+      <table>
+        <thead><tr>
+          <th class="left"></th><th>RC</th><th>華強</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="left">私銀貸款</td><td id="lm-rc-loan">—</td><td id="lm-hq-loan">—</td></tr>
+          <tr><td class="left">其他借款</td><td id="lm-rc-borrow">—</td><td id="lm-hq-borrow">—</td></tr>
+          <tr style="font-weight:700"><td class="left">私銀自有資金</td><td id="lm-rc-net">—</td><td id="lm-hq-net">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Totals bar -->
+    <div class="cash-totals" id="cash-totals-bar"></div>
+
+    <!-- Account cards by entity -->
+    <div id="cash-accounts-grid"></div>
+  </div>
+
+  <!-- ── Tab: Cash Ledger 資金細項記錄 ── -->
+  <div class="tab-panel" id="tab-cashledger">
+    <div class="ledger-toolbar">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="ledger-account" class="filter-select" onchange="loadCashLedger()" style="min-width:200px">
+          <option value="">請選擇帳戶</option>
+        </select>
+        <select id="ledger-month" class="filter-select" onchange="applyLedgerFilter()">
+          <option value="">全部月份</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="openCashEntryModal()">＋ 新增記錄</button>
+    </div>
+
+    <!-- Account balance header -->
+    <div id="ledger-account-header" style="display:none" class="totals-bar" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div id="ledger-acct-name" style="font-weight:700;font-size:15px"></div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">目前餘額</div>
+          <div id="ledger-acct-balance" style="font-size:22px;font-weight:700;font-family:var(--mono)"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fund ledger (only shown for fund accounts) -->
+    <div id="fund-ledger-section" style="display:none" class="card" style="margin-bottom:16px">
+      <div class="card-title">基金明細</div>
+      <div style="overflow-x:auto">
+        <table class="fund-table">
+          <thead><tr>
+            <th class="left">日期</th><th>投資成本</th><th>單位成本</th><th>單位數</th>
+            <th>累積金額</th><th>累積股數</th><th>平均單位成本</th><th>賣出金額</th><th>處分利益</th>
+          </tr></thead>
+          <tbody id="fund-table-body"></tbody>
+        </table>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="openFundEntryModal('申購')">申購基金</button>
+        <button class="btn btn-ghost btn-sm" onclick="openFundEntryModal('贖回')">贖回基金</button>
+      </div>
+    </div>
+
+    <!-- Cash entries table -->
+    <div class="card" style="padding:0;overflow:hidden" id="ledger-table-card">
+      <table>
+        <thead><tr>
+          <th class="left">日期</th>
+          <th class="left">類型</th>
+          <th class="left">說明</th>
+          <th>金額</th>
+          <th>餘額</th>
+          <th class="left">操作</th>
+        </tr></thead>
+        <tbody id="ledger-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Cash Entry Modal ── -->
+<div class="modal-overlay" id="cash-entry-modal" style="display:none" onclick="if(event.target.id==='cash-entry-modal')closeCashEntryModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:520px">
+    <div class="modal-title">新增資金記錄</div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>日期</label>
+        <input type="date" id="ce-date">
+      </div>
+      <div class="modal-field">
+        <label>類型</label>
+        <select id="ce-type" class="filter-select" style="width:100%" onchange="onCashEntryTypeChange()">
+          <option value="其他收入">其他收入</option>
+          <option value="其他支出">其他支出</option>
+          <option value="轉出賬戶">轉出賬戶</option>
+          <option value="借款">借款</option>
+          <option value="借款還款">借款還款</option>
+          <option value="貸款">貸款</option>
+          <option value="貸款還款">貸款還款</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>帳戶</label>
+      <select id="ce-account" class="filter-select" style="width:100%"></select>
+    </div>
+    <div class="modal-field" id="ce-target-field" style="display:none">
+      <label id="ce-target-label">轉入帳戶</label>
+      <select id="ce-target" class="filter-select" style="width:100%"></select>
+    </div>
+    <div class="modal-field">
+      <label>說明</label>
+      <input type="text" id="ce-desc" placeholder="交易說明（選填）" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-field">
+      <label>金額（正數=流入，負數=流出）</label>
+      <input type="number" id="ce-amount" placeholder="e.g. 500000 or -200000" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCashEntryModal()">取消</button>
+      <button class="btn btn-success" onclick="submitCashEntry()">✅ 確認儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fund Entry Modal ── -->
+<div class="modal-overlay" id="fund-entry-modal" style="display:none" onclick="if(event.target.id==='fund-entry-modal')closeFundEntryModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="fund-modal-title">申購基金</div>
+    <input type="hidden" id="fe-action">
+    <div class="modal-field">
+      <label>日期</label>
+      <input type="date" id="fe-date">
+    </div>
+    <div class="modal-field" id="fe-unitcost-field">
+      <label>單位成本（C欄）</label>
+      <input type="number" step="0.0001" id="fe-unitcost" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-field">
+      <label id="fe-units-label">單位數（D欄，申購填正數）</label>
+      <input type="number" step="0.1" id="fe-units" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-field" id="fe-redemption-field" style="display:none">
+      <label>賣出金額（H欄）</label>
+      <input type="number" id="fe-redemption" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeFundEntryModal()">取消</button>
+      <button class="btn btn-success" onclick="submitFundEntry()">✅ 確認儲存</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="edit-modal" style="display:none" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title">編輯交易記錄</div>
@@ -344,12 +557,14 @@ document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
 function switchTab(name) {
-  const names = ['holdings','upload','history'];
+  const names = ['holdings','upload','history','cashsummary','cashledger'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  if(name==='holdings') loadHoldings();
-  if(name==='history')  loadHistory();
+  if(name==='holdings')    loadHoldings();
+  if(name==='history')     loadHistory();
+  if(name==='cashsummary') loadCashSummary();
+  if(name==='cashledger')  loadCashLedger();
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
@@ -855,6 +1070,323 @@ function toast(msg,type='info'){
   setTimeout(()=>el.remove(),4000);
 }
 loadHoldings();
-</script>
+
+// ── Cash Summary ──────────────────────────────────────────────────────────────
+let allCashAccounts = [];
+
+async function loadCashSummary() {
+  const entity   = document.getElementById('cash-filter-entity').value;
+  const category = document.getElementById('cash-filter-cat').value;
+  let url = `${API}/api/cash/accounts`;
+  const params = [];
+  if(entity)   params.push(`entity=${encodeURIComponent(entity)}`);
+  if(category) params.push(`category=${encodeURIComponent(category)}`);
+  if(params.length) url += '?' + params.join('&');
+  try {
+    const res = await fetch(url);
+    const filtered = await res.json();
+    // Also keep full list for modals
+    const allRes = await fetch(`${API}/api/cash/accounts`);
+    allCashAccounts = await allRes.json();
+    renderCashSummary(filtered);
+  } catch(e) { toast('載入資金總表失敗','error'); }
+}
+
+function renderCashSummary(accounts) {
+  const grid      = document.getElementById('cash-accounts-grid');
+  const totalsBar = document.getElementById('cash-totals-bar');
+  grid.innerHTML  = '';
+
+  const entities     = [...new Set(accounts.map(a => a.entity))];
+  let grandTotal     = 0;
+  const entityTotals = {};
+
+  entities.forEach(ent => {
+    const accts = accounts.filter(a => a.entity === ent);
+    const total = accts.reduce((s,a) => s + (a.balance||0), 0);
+    entityTotals[ent] = total;
+    grandTotal += total;
+
+    const section = document.createElement('div');
+    section.className = 'cash-entity-section';
+    section.innerHTML = `<div class="cash-entity-title">${ent} <span style="font-size:12px;font-family:var(--mono);color:var(--text);font-weight:400">合計 ${fmt(Math.round(total))}</span></div>`;
+
+    const cardGrid = document.createElement('div');
+    cardGrid.className = 'cash-account-grid';
+    accts.forEach(a => {
+      const card = document.createElement('div');
+      card.className = 'cash-card' + (a.is_static ? ' static' : '');
+      card.onclick = () => {
+        const sel = document.getElementById('ledger-account');
+        if(sel) { sel.value = a.id; switchTab('cashledger'); loadCashLedger(); }
+      };
+      const catClass = a.category==='股票投資'?'tag-blue':a.category==='基金投資'?'tag-orange':'tag-green';
+      card.innerHTML = `
+        <div class="cash-card-name">${a.name}</div>
+        <div class="cash-card-cat"><span class="tag ${catClass}">${a.category}</span>${a.is_static?'<span style="font-size:10px;color:var(--muted);margin-left:4px">(靜態)</span>':''}</div>
+        <div class="cash-card-balance">${fmt(Math.round(a.balance||0))}</div>
+        ${a.bank?`<div class="cash-card-bank">${a.bank}</div>`:''}`;
+      cardGrid.appendChild(card);
+    });
+    section.appendChild(cardGrid);
+    grid.appendChild(section);
+  });
+
+  let totalsHtml = '';
+  entities.forEach(ent => {
+    totalsHtml += `<div class="cash-totals-item"><label>${ent}</label><strong>${fmt(Math.round(entityTotals[ent]||0))}</strong></div>`;
+  });
+  totalsHtml += `<div class="cash-totals-item" style="margin-left:auto"><label>總計</label><strong style="color:var(--accent)">${fmt(Math.round(grandTotal))}</strong></div>`;
+  totalsBar.innerHTML = totalsHtml;
+  updateLoanMatrix();
+}
+
+function updateLoanMatrix() {
+  const rcP = allCashAccounts.find(a=>a.id==='rc_private');
+  const hqP = allCashAccounts.find(a=>a.id==='hq_private');
+  document.getElementById('lm-rc-loan').textContent   = '—';
+  document.getElementById('lm-hq-loan').textContent   = '—';
+  document.getElementById('lm-rc-borrow').textContent = '—';
+  document.getElementById('lm-hq-borrow').textContent = '—';
+  document.getElementById('lm-rc-net').textContent    = rcP ? fmt(Math.round(rcP.balance||0)) : '—';
+  document.getElementById('lm-hq-net').textContent    = hqP ? fmt(Math.round(hqP.balance||0)) : '—';
+}
+
+// ── Cash Ledger ───────────────────────────────────────────────────────────────
+let allLedgerEntries = [];
+
+async function loadCashLedger() {
+  const accountId = document.getElementById('ledger-account').value;
+  if(!accountId) {
+    document.getElementById('ledger-body').innerHTML =
+      '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">請選擇帳戶</td></tr>';
+    document.getElementById('ledger-account-header').style.display='none';
+    document.getElementById('fund-ledger-section').style.display='none';
+    return;
+  }
+  try {
+    const [entRes, acctRes] = await Promise.all([
+      fetch(`${API}/api/cash/entries?account_id=${encodeURIComponent(accountId)}&limit=500`),
+      fetch(`${API}/api/cash/accounts`),
+    ]);
+    allLedgerEntries = await entRes.json();
+    allCashAccounts  = await acctRes.json();
+    const acct = allCashAccounts.find(a=>a.id===accountId);
+
+    if(acct) {
+      document.getElementById('ledger-account-header').style.display='block';
+      document.getElementById('ledger-acct-name').textContent    = acct.name;
+      document.getElementById('ledger-acct-balance').textContent = fmt(Math.round(acct.balance||0));
+    }
+
+    const isFund = acct && acct.category==='基金投資';
+    document.getElementById('fund-ledger-section').style.display = isFund?'block':'none';
+    if(isFund) await loadFundLedger(accountId);
+
+    const monthSel = document.getElementById('ledger-month');
+    const months   = [...new Set(allLedgerEntries.map(e=>e.entry_date.slice(0,7)))].sort().reverse();
+    const curVal   = monthSel.value;
+    monthSel.innerHTML = '<option value="">全部月份</option>';
+    months.forEach(m=>{
+      const o=document.createElement('option');
+      o.value=m; o.textContent=m;
+      if(m===curVal) o.selected=true;
+      monthSel.appendChild(o);
+    });
+    applyLedgerFilter();
+  } catch(e){ toast('載入失敗','error'); }
+}
+
+function applyLedgerFilter() {
+  const month   = document.getElementById('ledger-month').value;
+  const entries = month ? allLedgerEntries.filter(e=>e.entry_date.startsWith(month)) : allLedgerEntries;
+  renderLedgerTable(entries);
+}
+
+function renderLedgerTable(entries) {
+  const tbody = document.getElementById('ledger-body');
+  if(!entries.length) {
+    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';
+    return;
+  }
+  tbody.innerHTML = entries.map(e => {
+    const isIn   = e.amount >= 0;
+    const badge  = entryTypeBadge(e.entry_type);
+    const autoTag= e.is_auto?'<span style="font-size:10px;color:var(--muted);margin-left:4px">自動</span>':'';
+    const editBtn= e.is_auto?'':
+      `<button class="btn btn-ghost btn-sm" onclick="openEditCashEntry(${e.id})" style="margin-right:4px">✏</button>`;
+    const delBtn = `<button class="btn btn-danger btn-sm" onclick="deleteCashEntry(${e.id})">🗑</button>`;
+    return `<tr>
+      <td class="left">${e.entry_date}</td>
+      <td class="left">${badge}${autoTag}</td>
+      <td class="left">${e.description||'—'}</td>
+      <td class="${isIn?'positive':'negative'}">${isIn?'+':''}${fmt(Math.round(e.amount))}</td>
+      <td>${fmt(Math.round(e.balance_after))}</td>
+      <td class="left" style="white-space:nowrap">${editBtn}${delBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function entryTypeBadge(type) {
+  const cls = type==='買入股票'?'etype-buy':type==='賣出股票'?'etype-sell':
+    type==='轉出賬戶'?'etype-transfer':
+    (type==='申購基金'||type==='贖回基金')?'etype-fund':
+    (type==='貸款'||type==='貸款還款'||type==='借款'||type==='借款還款')?'etype-loan':'etype-other';
+  return `<span class="etype ${cls}">${type}</span>`;
+}
+
+async function deleteCashEntry(id) {
+  if(!confirm('確定刪除這筆記錄？如有對應轉入/轉出，兩筆都會刪除。')) return;
+  try {
+    const res = await fetch(`${API}/api/cash/entry/${id}`,{method:'DELETE'});
+    if(res.ok){ toast('✅ 已刪除','success'); loadCashLedger(); loadCashSummary(); }
+    else toast('刪除失敗','error');
+  } catch(e){ toast('連線失敗','error'); }
+}
+
+// ── Cash Entry Modal ──────────────────────────────────────────────────────────
+function openCashEntryModal() {
+  const nonStatic = allCashAccounts.filter(a=>!a.is_static);
+  const sel    = document.getElementById('ce-account');
+  const selTgt = document.getElementById('ce-target');
+  sel.innerHTML    = nonStatic.map(a=>`<option value="${a.id}">[${a.entity}] ${a.name}</option>`).join('');
+  selTgt.innerHTML = nonStatic.map(a=>`<option value="${a.id}">[${a.entity}] ${a.name}</option>`).join('');
+  const cur = document.getElementById('ledger-account').value;
+  if(cur) sel.value = cur;
+  document.getElementById('ce-date').value   = new Date().toISOString().slice(0,10);
+  document.getElementById('ce-amount').value = '';
+  document.getElementById('ce-desc').value   = '';
+  document.getElementById('ce-type').value   = '其他收入';
+  onCashEntryTypeChange();
+  document.getElementById('cash-entry-modal').style.display='flex';
+}
+function closeCashEntryModal(){ document.getElementById('cash-entry-modal').style.display='none'; }
+
+function onCashEntryTypeChange() {
+  const type = document.getElementById('ce-type').value;
+  const tgtField = document.getElementById('ce-target-field');
+  const tgtLabel = document.getElementById('ce-target-label');
+  const needs = ['轉出賬戶','借款','借款還款'].includes(type);
+  tgtField.style.display = needs?'block':'none';
+  if(type==='轉出賬戶') tgtLabel.textContent='轉入帳戶';
+  else if(type==='借款') tgtLabel.textContent='借入帳戶';
+  else if(type==='借款還款') tgtLabel.textContent='還款帳戶';
+}
+
+async function submitCashEntry() {
+  const type   = document.getElementById('ce-type').value;
+  const acctId = document.getElementById('ce-account').value;
+  const date_  = document.getElementById('ce-date').value;
+  const desc   = document.getElementById('ce-desc').value.trim();
+  const amount = parseFloat(document.getElementById('ce-amount').value);
+  if(!date_)    { toast('請填入日期','error'); return; }
+  if(isNaN(amount)){ toast('請填入金額','error'); return; }
+  const body = {account_id:acctId, entry_date:date_, entry_type:type, description:desc, amount};
+  if(['轉出賬戶','借款','借款還款'].includes(type))
+    body.target_account_id = document.getElementById('ce-target').value;
+  try {
+    const res  = await fetch(`${API}/api/cash/entry`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data = await res.json();
+    if(res.ok){ toast('✅ 已儲存','success'); closeCashEntryModal(); loadCashLedger(); loadCashSummary(); }
+    else toast(data.error||'儲存失敗','error');
+  } catch(e){ toast('連線失敗','error'); }
+}
+
+async function openEditCashEntry(id) {
+  const e = allLedgerEntries.find(x=>x.id===id);
+  if(!e) return;
+  const desc   = prompt('說明：', e.description||'');
+  if(desc===null) return;
+  const amount = prompt('金額（正數=流入，負數=流出）：', e.amount);
+  if(amount===null) return;
+  try {
+    const res = await fetch(`${API}/api/cash/entry/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc,amount:parseFloat(amount)})});
+    if(res.ok){ toast('✅ 已更新','success'); loadCashLedger(); loadCashSummary(); }
+    else toast('更新失敗','error');
+  } catch(e){ toast('連線失敗','error'); }
+}
+
+// ── Fund Ledger ───────────────────────────────────────────────────────────────
+async function loadFundLedger(accountId) {
+  try {
+    const res     = await fetch(`${API}/api/cash/fund_entries?account_id=${encodeURIComponent(accountId)}`);
+    const entries = await res.json();
+    const tbody   = document.getElementById('fund-table-body');
+    if(!entries.length){
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">無記錄</td></tr>';
+      return;
+    }
+    tbody.innerHTML = entries.map(e=>`<tr>
+      <td class="left">${e.entry_date}</td>
+      <td class="${e.cost>=0?'negative':'positive'}">${fmt(Math.round(e.cost))}</td>
+      <td>${e.unit_cost?.toFixed(4)??'—'}</td>
+      <td>${e.units?.toLocaleString()??'—'}</td>
+      <td>${fmt(Math.round(e.cumulative_amount))}</td>
+      <td>${e.cumulative_units?.toLocaleString()??'—'}</td>
+      <td>${e.avg_unit_cost?.toFixed(4)??'—'}</td>
+      <td>${e.redemption_amount!=null?fmt(Math.round(e.redemption_amount)):'—'}</td>
+      <td class="${(e.profit||0)>=0?'positive':'negative'}">${e.profit!=null?fmt(Math.round(e.profit)):'—'}</td>
+    </tr>`).join('');
+  } catch(e){ toast('載入基金明細失敗','error'); }
+}
+
+function openFundEntryModal(action) {
+  document.getElementById('fe-action').value              = action;
+  document.getElementById('fund-modal-title').textContent = action==='申購'?'申購基金':'贖回基金';
+  document.getElementById('fe-date').value                = new Date().toISOString().slice(0,10);
+  document.getElementById('fe-units').value               = '';
+  document.getElementById('fe-unitcost').value            = '';
+  document.getElementById('fe-redemption').value          = '';
+  document.getElementById('fe-units-label').textContent   = action==='申購'?'單位數（D欄，正數）':'單位數（D欄，贖回填負數）';
+  document.getElementById('fe-unitcost-field').style.display   = action==='申購'?'block':'none';
+  document.getElementById('fe-redemption-field').style.display = action==='贖回'?'block':'none';
+  document.getElementById('fund-entry-modal').style.display    = 'flex';
+}
+function closeFundEntryModal(){ document.getElementById('fund-entry-modal').style.display='none'; }
+
+async function submitFundEntry() {
+  const accountId = document.getElementById('ledger-account').value;
+  const action    = document.getElementById('fe-action').value;
+  const date_     = document.getElementById('fe-date').value;
+  const units     = parseFloat(document.getElementById('fe-units').value);
+  if(!date_||isNaN(units)){ toast('請填入日期和單位數','error'); return; }
+  const body = {account_id:accountId, action, entry_date:date_, units};
+  if(action==='申購'){
+    const uc=parseFloat(document.getElementById('fe-unitcost').value);
+    if(isNaN(uc)){ toast('請填入單位成本','error'); return; }
+    body.unit_cost=uc;
+  } else {
+    const ra=parseFloat(document.getElementById('fe-redemption').value);
+    if(isNaN(ra)){ toast('請填入賣出金額','error'); return; }
+    body.redemption_amount=ra;
+    body.units=-Math.abs(units);
+  }
+  try {
+    const res  = await fetch(`${API}/api/cash/fund_entry`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data = await res.json();
+    if(res.ok){ toast('✅ 已儲存','success'); closeFundEntryModal(); loadCashLedger(); loadCashSummary(); }
+    else toast(data.error||'儲存失敗','error');
+  } catch(e){ toast('連線失敗','error'); }
+}
+
+// ── Init cash account selector ────────────────────────────────────────────────
+async function initCashAccountSelector() {
+  try {
+    const res = await fetch(`${API}/api/cash/accounts`);
+    allCashAccounts = await res.json();
+    const sel = document.getElementById('ledger-account');
+    ['RC','華強'].forEach(ent => {
+      const group = document.createElement('optgroup');
+      group.label = ent;
+      allCashAccounts.filter(a=>a.entity===ent).forEach(a=>{
+        const o=document.createElement('option');
+        o.value=a.id; o.textContent=a.name;
+        group.appendChild(o);
+      });
+      sel.appendChild(group);
+    });
+  } catch(e){}
+}
+initCashAccountSelector();
 </body>
 </html>
