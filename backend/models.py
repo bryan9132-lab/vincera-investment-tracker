@@ -374,6 +374,9 @@ class AuditLog(db.Model):
             'summary':    self.summary,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M'),
         }
+
+
+class FundEntry(db.Model):
     """
     One row per 貨幣基金 transaction (申購 or 贖回).
     Mirrors the Excel 貨幣基金(RC/華強) sheet columns A–I.
