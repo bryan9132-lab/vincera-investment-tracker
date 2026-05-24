@@ -350,7 +350,30 @@ class CashEntry(db.Model):
         }
 
 
-class FundEntry(db.Model):
+class AuditLog(db.Model):
+    """
+    Tracks every delete/edit action Sophie takes.
+    Stores a snapshot of the original data so it can be recovered.
+    """
+    __tablename__ = 'audit_logs'
+
+    id          = db.Column(db.Integer,     primary_key=True)
+    action      = db.Column(db.String(20),  nullable=False)   # 'delete' / 'edit'
+    table_name  = db.Column(db.String(40),  nullable=False)   # 'transactions' / 'cash_entries' / 'fund_entries'
+    record_id   = db.Column(db.Integer,     nullable=False)   # original PK
+    summary     = db.Column(db.String(300), nullable=True)    # human-readable description
+    snapshot    = db.Column(db.Text,        nullable=True)    # JSON snapshot of original record
+    created_at  = db.Column(db.DateTime,    default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':         self.id,
+            'action':     self.action,
+            'table_name': self.table_name,
+            'record_id':  self.record_id,
+            'summary':    self.summary,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M'),
+        }
     """
     One row per 貨幣基金 transaction (申購 or 贖回).
     Mirrors the Excel 貨幣基金(RC/華強) sheet columns A–I.

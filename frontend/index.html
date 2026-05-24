@@ -188,6 +188,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" onclick="updatePrices()"><span id="price-btn-text">🔄 更新市價</span></button>
         <button class="btn btn-success" onclick="exportExcel()">⬇ 匯出 Excel</button>
+        <button class="btn btn-ghost" onclick="openAuditModal()" title="操作記錄">📋</button>
       </div>
     </div>
 
@@ -450,6 +451,27 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         </tr></thead>
         <tbody id="ledger-body"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Audit Log Modal ── -->
+<div class="modal-overlay" id="audit-modal" style="display:none" onclick="if(event.target.id==='audit-modal')closeAuditModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:680px;max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-title">📋 操作記錄</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">顯示最近 100 筆刪除/編輯操作</div>
+    <div style="overflow-y:auto;flex:1">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2)">時間</th>
+          <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2)">操作</th>
+          <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2)">說明</th>
+        </tr></thead>
+        <tbody id="audit-body"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAuditModal()">關閉</button>
     </div>
   </div>
 </div>
@@ -1441,6 +1463,31 @@ async function submitFundEntry() {
     else toast(data.error||'儲存失敗','error');
   } catch(e){ toast('連線失敗','error'); }
 }
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+async function openAuditModal() {
+  document.getElementById('audit-modal').style.display = 'flex';
+  try {
+    const res  = await fetch(`${API}/api/audit_log?limit=100`);
+    const logs = await res.json();
+    const tbody = document.getElementById('audit-body');
+    if(!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px">尚無操作記錄</td></tr>';
+      return;
+    }
+    tbody.innerHTML = logs.map(l => {
+      const actionBadge = l.action === 'delete'
+        ? '<span style="background:rgba(248,113,113,.15);color:var(--danger);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">刪除</span>'
+        : '<span style="background:rgba(79,142,247,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">編輯</span>';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap">${l.created_at}</td>
+        <td style="padding:8px 10px">${actionBadge}</td>
+        <td style="padding:8px 10px;font-size:12px">${l.summary||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { toast('載入操作記錄失敗','error'); }
+}
+function closeAuditModal() { document.getElementById('audit-modal').style.display = 'none'; }
 
 // ── Init cash account selector ────────────────────────────────────────────────
 async function initCashAccountSelector() {

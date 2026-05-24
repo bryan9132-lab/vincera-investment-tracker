@@ -14,7 +14,7 @@ import tempfile
 from backend.models import (db, Transaction, Position, Security, UploadLog,
                             ACCOUNT_MAP, CASH_ACCOUNTS, CASH_ACCOUNT_BROKER_MAP,
                             FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
-                            CashAccount, CashEntry, FundEntry)
+                            CashAccount, CashEntry, FundEntry, AuditLog)
 from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
@@ -220,7 +220,8 @@ def create_app():
                     cash_amount = -txn.net_amount if is_buy else txn.net_amount
                     shares_lots = int(abs(txn.shares) / 1000) if abs(txn.shares) >= 1000 else abs(txn.shares)
                     lots_unit   = '張' if abs(txn.shares) >= 1000 else '股'
-                    desc = f"{txn.security_code} {txn.security_name or ''} {shares_lots}{lots_unit} 成本{abs(round(txn.net_amount)):,}"
+                    per_share   = round(txn.price, 2)
+                    desc = f"{txn.security_code} {txn.security_name or ''} {shares_lots}{lots_unit} @{per_share}/股"
                     cash_acct.balance += cash_amount
                     ce = CashEntry(
                         account_id     = cash_acct_id,
@@ -522,25 +523,44 @@ def create_app():
         txn.tax           = float(data.get('tax', txn.tax))
         txn.net_amount    = float(data['net_amount'])
         db.session.commit()
+        _audit('edit', 'transactions', txn_id,
+               f'編輯交易 {txn.security_code} {txn.security_name} ({txn.entity})',
+               txn.to_dict())
+        db.session.commit()
         recalculate_positions(entity)
-        return jsonify({'status': 'ok'})
-
-    @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
     def delete_transaction(txn_id):
         """Delete a transaction, its linked cash entries, and recalculate."""
         txn    = Transaction.query.get_or_404(txn_id)
         entity = txn.entity
+        security_code = txn.security_code
 
         linked_cash = CashEntry.query.filter_by(transaction_id=txn.id).all()
         affected_cash_accounts = set(ce.account_id for ce in linked_cash)
 
         try:
+            snapshot = txn.to_dict()
             for ce in linked_cash:
                 db.session.delete(ce)
             db.session.delete(txn)
             db.session.flush()
+
+            # If security_code exists, also clean up any zero-share position directly
+            if security_code:
+                pos = Position.query.filter_by(entity=entity, security_code=security_code).first()
+                if pos:
+                    # Check if any remaining transactions exist for this entity+security
+                    remaining = Transaction.query.filter_by(
+                        entity=entity, security_code=security_code
+                    ).filter(Transaction.shares != 0).count()
+                    if remaining == 0:
+                        db.session.delete(pos)
+
             for acct_id in affected_cash_accounts:
                 _recalculate_cash_balance(acct_id)
+
+            _audit('delete', 'transactions', txn_id,
+                   f'刪除交易 {snapshot.get("security_code","?")} {snapshot.get("security_name","?")} ({snapshot.get("entity","?")}) {snapshot.get("trade_date","?")}',
+                   snapshot)
             db.session.commit()
             recalculate_positions(entity)
             return jsonify({'status': 'ok', 'cash_entries_removed': len(linked_cash)})
@@ -648,6 +668,10 @@ def create_app():
                 return jsonify({'error': '轉出賬戶只限同一實體（RC↔RC 或 華強↔華強）。跨實體請用借款'}), 400
             if account_id == target_id:
                 return jsonify({'error': '轉出和轉入帳戶不能相同'}), 400
+            if target.category == '基金投資':
+                return jsonify({'error': '貨幣基金帳戶不接受轉帳，請轉入對應的私銀帳戶'}), 400
+            if amount <= 0:
+                return jsonify({'error': '轉出金額請填正數，系統會自動處理方向'}), 400
 
         elif entry_type in ('借款', '借款還款'):
             target_id = data.get('target_account_id', '').strip()
@@ -658,6 +682,10 @@ def create_app():
                 return jsonify({'error': f'找不到對方帳戶：{target_id}'}), 404
             if acct.entity == target.entity:
                 return jsonify({'error': '借款只限跨實體（RC↔華強）。同一實體請用轉出賬戶'}), 400
+            if target.category == '基金投資':
+                return jsonify({'error': '貨幣基金帳戶不接受借款，請選對應的私銀帳戶'}), 400
+            if amount <= 0:
+                return jsonify({'error': '借款/還款金額請填正數，系統會自動處理方向'}), 400
 
         elif entry_type in ('貸款', '貸款還款'):
             if 'private' not in acct.id:
@@ -731,6 +759,7 @@ def create_app():
         affected = set(e.account_id for e in to_delete)
 
         try:
+            snapshots = [e.to_dict() for e in to_delete]
             # Break circular FK links first so DELETE doesn't fail
             for e in to_delete:
                 e.linked_entry_id = None
@@ -740,13 +769,16 @@ def create_app():
             db.session.flush()
             for acct_id in affected:
                 _recalculate_cash_balance(acct_id)
+            for s in snapshots:
+                _audit('delete', 'cash_entries', s['id'],
+                       f'刪除資金記錄 {s.get("entry_type","?")} {s.get("entry_date","?")} {s.get("description","?")} 金額{s.get("amount","?")}',
+                       s)
             db.session.commit()
             return jsonify({'status': 'ok'})
         except Exception as e:
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    # ── Edit cash entry ──────────────────────────────────────────────────────
     @app.route('/api/cash/entry/<int:entry_id>', methods=['PUT'])
     def edit_cash_entry(entry_id):
         """Edit a manual cash entry. If linked (transfer/loan), syncs mirror amount too."""
@@ -967,6 +999,14 @@ def create_app():
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
+    # ── Audit log ────────────────────────────────────────────────────────────
+    @app.route('/api/audit_log', methods=['GET'])
+    def get_audit_log():
+        """Return recent audit log entries (delete/edit actions)."""
+        limit = int(request.args.get('limit', 100))
+        logs  = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+        return jsonify([l.to_dict() for l in logs])
+
     return app
 
 
@@ -1009,6 +1049,19 @@ def _seed_securities():
         if not Security.query.get(code):
             db.session.add(Security(code=code, name=name))
     db.session.commit()
+
+
+def _audit(action, table_name, record_id, summary, snapshot_dict=None):
+    """Write one row to audit_logs."""
+    import json
+    log = AuditLog(
+        action     = action,
+        table_name = table_name,
+        record_id  = record_id,
+        summary    = summary,
+        snapshot   = json.dumps(snapshot_dict, ensure_ascii=False, default=str) if snapshot_dict else None,
+    )
+    db.session.add(log)
 
 
 def _seed_cash_accounts():
