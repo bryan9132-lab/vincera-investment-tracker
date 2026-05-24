@@ -356,12 +356,17 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <option value="RC">RC</option>
         <option value="華強">華強</option>
       </select>
-      <select id="cash-filter-cat" class="filter-select" onchange="loadCashSummary()">
-        <option value="">全部類別</option>
-        <option value="股票投資">股票投資</option>
-        <option value="基金投資">基金投資</option>
-        <option value="非投資">非投資</option>
-      </select>
+      <div style="display:flex;gap:12px;align-items:center;font-size:13px">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="cb-stock" checked onchange="loadCashSummary()"> 股票投資
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="cb-fund" checked onchange="loadCashSummary()"> 基金投資
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="cb-noninvest" checked onchange="loadCashSummary()"> 非投資
+        </label>
+      </div>
     </div>
 
     <!-- Loan matrix -->
@@ -390,8 +395,9 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
   <div class="tab-panel" id="tab-cashledger">
     <div class="ledger-toolbar">
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-ghost btn-sm" id="ledger-back-btn" style="display:none" onclick="goBackToCashSummary()">← 返回資金總表</button>
         <select id="ledger-account" class="filter-select" onchange="loadCashLedger()" style="min-width:200px">
-          <option value="">請選擇帳戶</option>
+          <option value="">全部帳戶</option>
         </select>
         <select id="ledger-month" class="filter-select" onchange="applyLedgerFilter()">
           <option value="">全部月份</option>
@@ -400,8 +406,8 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <button class="btn btn-primary" onclick="openCashEntryModal()">＋ 新增記錄</button>
     </div>
 
-    <!-- Account balance header -->
-    <div id="ledger-account-header" style="display:none" class="totals-bar" style="margin-bottom:16px">
+    <!-- Account balance header (only shown when single account selected) -->
+    <div id="ledger-account-header" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div id="ledger-acct-name" style="font-weight:700;font-size:15px"></div>
         <div style="text-align:right">
@@ -412,13 +418,13 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     </div>
 
     <!-- Fund ledger (only shown for fund accounts) -->
-    <div id="fund-ledger-section" style="display:none" class="card" style="margin-bottom:16px">
+    <div id="fund-ledger-section" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
       <div class="card-title">基金明細</div>
       <div style="overflow-x:auto">
         <table class="fund-table">
           <thead><tr>
             <th class="left">日期</th><th>投資成本</th><th>單位成本</th><th>單位數</th>
-            <th>累積金額</th><th>累積股數</th><th>平均單位成本</th><th>賣出金額</th><th>處分利益</th>
+            <th>累積金額</th><th>累積股數</th><th>平均單位成本</th><th>賣出金額</th><th>處分利益</th><th></th>
           </tr></thead>
           <tbody id="fund-table-body"></tbody>
         </table>
@@ -434,8 +440,10 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <table>
         <thead><tr>
           <th class="left">日期</th>
+          <th class="left">帳戶</th>
           <th class="left">類型</th>
           <th class="left">說明</th>
+          <th class="left">對方帳戶</th>
           <th>金額</th>
           <th>餘額</th>
           <th class="left">操作</th>
@@ -1075,19 +1083,25 @@ loadHoldings();
 let allCashAccounts = [];
 
 async function loadCashSummary() {
-  const entity   = document.getElementById('cash-filter-entity').value;
-  const category = document.getElementById('cash-filter-cat').value;
-  let url = `${API}/api/cash/accounts`;
-  const params = [];
-  if(entity)   params.push(`entity=${encodeURIComponent(entity)}`);
-  if(category) params.push(`category=${encodeURIComponent(category)}`);
-  if(params.length) url += '?' + params.join('&');
+  const entity    = document.getElementById('cash-filter-entity').value;
+  const cbStock   = document.getElementById('cb-stock').checked;
+  const cbFund    = document.getElementById('cb-fund').checked;
+  const cbNonInv  = document.getElementById('cb-noninvest').checked;
+
   try {
-    const res = await fetch(url);
-    const filtered = await res.json();
-    // Also keep full list for modals
-    const allRes = await fetch(`${API}/api/cash/accounts`);
-    allCashAccounts = await allRes.json();
+    const res = await fetch(`${API}/api/cash/accounts`);
+    allCashAccounts = await res.json();
+
+    // Filter by entity
+    let filtered = entity ? allCashAccounts.filter(a => a.entity === entity) : allCashAccounts;
+
+    // Filter by category checkboxes
+    const allowed = [];
+    if(cbStock)  allowed.push('股票投資');
+    if(cbFund)   allowed.push('基金投資');
+    if(cbNonInv) allowed.push('非投資');
+    filtered = filtered.filter(a => allowed.includes(a.category));
+
     renderCashSummary(filtered);
   } catch(e) { toast('載入資金總表失敗','error'); }
 }
@@ -1118,7 +1132,12 @@ function renderCashSummary(accounts) {
       card.className = 'cash-card' + (a.is_static ? ' static' : '');
       card.onclick = () => {
         const sel = document.getElementById('ledger-account');
-        if(sel) { sel.value = a.id; switchTab('cashledger'); loadCashLedger(); }
+        if(sel) {
+          sel.value = a.id;
+          document.getElementById('ledger-back-btn').style.display = 'inline-flex';
+          switchTab('cashledger');
+          loadCashLedger();
+        }
       };
       const catClass = a.category==='股票投資'?'tag-blue':a.category==='基金投資'?'tag-orange':'tag-green';
       card.innerHTML = `
@@ -1157,44 +1176,44 @@ let allLedgerEntries = [];
 
 async function loadCashLedger() {
   const accountId = document.getElementById('ledger-account').value;
-  if(!accountId) {
-    document.getElementById('ledger-body').innerHTML =
-      '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">請選擇帳戶</td></tr>';
-    document.getElementById('ledger-account-header').style.display='none';
-    document.getElementById('fund-ledger-section').style.display='none';
-    return;
-  }
   try {
-    const [entRes, acctRes] = await Promise.all([
-      fetch(`${API}/api/cash/entries?account_id=${encodeURIComponent(accountId)}&limit=500`),
-      fetch(`${API}/api/cash/accounts`),
-    ]);
-    allLedgerEntries = await entRes.json();
-    allCashAccounts  = await acctRes.json();
-    const acct = allCashAccounts.find(a=>a.id===accountId);
+    const acctRes = await fetch(`${API}/api/cash/accounts`);
+    allCashAccounts = await acctRes.json();
 
+    let entUrl = `${API}/api/cash/entries?limit=500`;
+    if(accountId) entUrl += `&account_id=${encodeURIComponent(accountId)}`;
+    const entRes = await fetch(entUrl);
+    allLedgerEntries = await entRes.json();
+
+    const acct = accountId ? allCashAccounts.find(a => a.id === accountId) : null;
+
+    // Account header (only for single account)
     if(acct) {
-      document.getElementById('ledger-account-header').style.display='block';
+      document.getElementById('ledger-account-header').style.display = 'block';
       document.getElementById('ledger-acct-name').textContent    = acct.name;
       document.getElementById('ledger-acct-balance').textContent = fmt(Math.round(acct.balance||0));
+    } else {
+      document.getElementById('ledger-account-header').style.display = 'none';
     }
 
-    const isFund = acct && acct.category==='基金投資';
-    document.getElementById('fund-ledger-section').style.display = isFund?'block':'none';
+    // Fund section (only for fund accounts)
+    const isFund = acct && acct.category === '基金投資';
+    document.getElementById('fund-ledger-section').style.display = isFund ? 'block' : 'none';
     if(isFund) await loadFundLedger(accountId);
 
+    // Month filter
     const monthSel = document.getElementById('ledger-month');
-    const months   = [...new Set(allLedgerEntries.map(e=>e.entry_date.slice(0,7)))].sort().reverse();
+    const months   = [...new Set(allLedgerEntries.map(e => e.entry_date.slice(0,7)))].sort().reverse();
     const curVal   = monthSel.value;
     monthSel.innerHTML = '<option value="">全部月份</option>';
-    months.forEach(m=>{
-      const o=document.createElement('option');
-      o.value=m; o.textContent=m;
-      if(m===curVal) o.selected=true;
+    months.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m;
+      if(m === curVal) o.selected = true;
       monthSel.appendChild(o);
     });
     applyLedgerFilter();
-  } catch(e){ toast('載入失敗','error'); }
+  } catch(e) { toast('載入失敗','error'); }
 }
 
 function applyLedgerFilter() {
@@ -1203,28 +1222,78 @@ function applyLedgerFilter() {
   renderLedgerTable(entries);
 }
 
+function goBackToCashSummary() {
+  document.getElementById('ledger-back-btn').style.display = 'none';
+  document.getElementById('ledger-account').value = '';
+  switchTab('cashsummary');
+}
+
 function renderLedgerTable(entries) {
   const tbody = document.getElementById('ledger-body');
   if(!entries.length) {
-    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>`;
     return;
   }
+  // Build account name lookup
+  const acctName = {};
+  allCashAccounts.forEach(a => acctName[a.id] = a.name);
+
   tbody.innerHTML = entries.map(e => {
-    const isIn   = e.amount >= 0;
-    const badge  = entryTypeBadge(e.entry_type);
-    const autoTag= e.is_auto?'<span style="font-size:10px;color:var(--muted);margin-left:4px">自動</span>':'';
-    const editBtn= e.is_auto?'':
-      `<button class="btn btn-ghost btn-sm" onclick="openEditCashEntry(${e.id})" style="margin-right:4px">✏</button>`;
-    const delBtn = `<button class="btn btn-danger btn-sm" onclick="deleteCashEntry(${e.id})">🗑</button>`;
-    return `<tr>
+    const isIn    = e.amount >= 0;
+    const badge   = entryTypeBadge(e.entry_type);
+    const autoTag = e.is_auto ? '<span style="font-size:10px;color:var(--muted);margin-left:4px">自動</span>' : '';
+    const acctCell = acctName[e.account_id] || e.account_id;
+
+    // 對方帳戶: find mirror entry's account
+    let counterpart = '—';
+    if(e.linked_entry_id) {
+      const mirror = allLedgerEntries.find(x => x.id === e.linked_entry_id);
+      if(mirror) counterpart = acctName[mirror.account_id] || mirror.account_id;
+    }
+
+    const editBtn = e.is_auto ? '' :
+      `<button class="btn btn-ghost btn-sm" onclick="startInlineEdit(${e.id})" style="margin-right:4px" title="編輯">✏</button>`;
+    const delBtn = `<button class="btn btn-danger btn-sm" onclick="deleteCashEntry(${e.id})" title="刪除">🗑</button>`;
+
+    return `<tr id="ledger-row-${e.id}">
       <td class="left">${e.entry_date}</td>
+      <td class="left" style="font-size:12px;color:var(--muted)">${acctCell}</td>
       <td class="left">${badge}${autoTag}</td>
-      <td class="left">${e.description||'—'}</td>
-      <td class="${isIn?'positive':'negative'}">${isIn?'+':''}${fmt(Math.round(e.amount))}</td>
+      <td class="left" id="desc-cell-${e.id}">${e.description||'—'}</td>
+      <td class="left" style="font-size:12px;color:var(--muted)">${counterpart}</td>
+      <td class="${isIn?'positive':'negative'}" id="amt-cell-${e.id}">${isIn?'+':''}${fmt(Math.round(e.amount))}</td>
       <td>${fmt(Math.round(e.balance_after))}</td>
       <td class="left" style="white-space:nowrap">${editBtn}${delBtn}</td>
     </tr>`;
   }).join('');
+}
+
+function startInlineEdit(id) {
+  const e = allLedgerEntries.find(x => x.id === id);
+  if(!e) return;
+  const descCell = document.getElementById(`desc-cell-${id}`);
+  const amtCell  = document.getElementById(`amt-cell-${id}`);
+  if(!descCell || !amtCell) return;
+
+  descCell.innerHTML = `<input id="edit-desc-${id}" value="${e.description||''}" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:3px 6px;width:120px">`;
+  amtCell.innerHTML  = `<input id="edit-amt-${id}" value="${e.amount}" type="number" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;padding:3px 6px;width:90px">
+    <button class="btn btn-success btn-sm" onclick="saveInlineEdit(${id})" style="margin-left:4px">✓</button>
+    <button class="btn btn-ghost btn-sm" onclick="applyLedgerFilter()" style="margin-left:2px">✕</button>`;
+}
+
+async function saveInlineEdit(id) {
+  const desc   = document.getElementById(`edit-desc-${id}`)?.value ?? '';
+  const amount = parseFloat(document.getElementById(`edit-amt-${id}`)?.value);
+  if(isNaN(amount)) { toast('請填入有效金額','error'); return; }
+  try {
+    const res = await fetch(`${API}/api/cash/entry/${id}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({description: desc, amount})
+    });
+    const data = await res.json();
+    if(res.ok) { toast('✅ 已更新','success'); loadCashLedger(); loadCashSummary(); }
+    else toast(data.error||'更新失敗','error');
+  } catch(e) { toast('連線失敗','error'); }
 }
 
 function entryTypeBadge(type) {
@@ -1236,12 +1305,17 @@ function entryTypeBadge(type) {
 }
 
 async function deleteCashEntry(id) {
-  if(!confirm('確定刪除這筆記錄？如有對應轉入/轉出，兩筆都會刪除。')) return;
+  const e = allLedgerEntries.find(x => x.id === id);
+  const hasLinked = e && e.linked_entry_id;
+  const msg = hasLinked
+    ? '確定刪除這筆記錄？此記錄有對應的轉入/轉出記錄，兩筆都會一起刪除。'
+    : '確定刪除這筆記錄？';
+  if(!confirm(msg)) return;
   try {
-    const res = await fetch(`${API}/api/cash/entry/${id}`,{method:'DELETE'});
-    if(res.ok){ toast('✅ 已刪除','success'); loadCashLedger(); loadCashSummary(); }
-    else toast('刪除失敗','error');
-  } catch(e){ toast('連線失敗','error'); }
+    const res = await fetch(`${API}/api/cash/entry/${id}`, {method:'DELETE'});
+    if(res.ok) { toast('✅ 已刪除','success'); loadCashLedger(); loadCashSummary(); }
+    else { const d = await res.json(); toast(d.error||'刪除失敗','error'); }
+  } catch(e) { toast('連線失敗','error'); }
 }
 
 // ── Cash Entry Modal ──────────────────────────────────────────────────────────
@@ -1292,19 +1366,8 @@ async function submitCashEntry() {
   } catch(e){ toast('連線失敗','error'); }
 }
 
-async function openEditCashEntry(id) {
-  const e = allLedgerEntries.find(x=>x.id===id);
-  if(!e) return;
-  const desc   = prompt('說明：', e.description||'');
-  if(desc===null) return;
-  const amount = prompt('金額（正數=流入，負數=流出）：', e.amount);
-  if(amount===null) return;
-  try {
-    const res = await fetch(`${API}/api/cash/entry/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc,amount:parseFloat(amount)})});
-    if(res.ok){ toast('✅ 已更新','success'); loadCashLedger(); loadCashSummary(); }
-    else toast('更新失敗','error');
-  } catch(e){ toast('連線失敗','error'); }
-}
+
+
 
 // ── Fund Ledger ───────────────────────────────────────────────────────────────
 async function loadFundLedger(accountId) {
@@ -1313,7 +1376,7 @@ async function loadFundLedger(accountId) {
     const entries = await res.json();
     const tbody   = document.getElementById('fund-table-body');
     if(!entries.length){
-      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">無記錄</td></tr>';
+      tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:20px">無記錄</td></tr>';
       return;
     }
     tbody.innerHTML = entries.map(e=>`<tr>
@@ -1326,8 +1389,18 @@ async function loadFundLedger(accountId) {
       <td>${e.avg_unit_cost?.toFixed(4)??'—'}</td>
       <td>${e.redemption_amount!=null?fmt(Math.round(e.redemption_amount)):'—'}</td>
       <td class="${(e.profit||0)>=0?'positive':'negative'}">${e.profit!=null?fmt(Math.round(e.profit)):'—'}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteFundEntry(${e.id})">🗑</button></td>
     </tr>`).join('');
   } catch(e){ toast('載入基金明細失敗','error'); }
+}
+
+async function deleteFundEntry(id) {
+  if(!confirm('確定刪除這筆基金記錄？對應的現金帳戶記錄也會一起刪除。')) return;
+  try {
+    const res = await fetch(`${API}/api/cash/fund_entry/${id}`, {method:'DELETE'});
+    if(res.ok) { toast('✅ 已刪除','success'); loadCashLedger(); loadCashSummary(); }
+    else { const d = await res.json(); toast(d.error||'刪除失敗','error'); }
+  } catch(e) { toast('連線失敗','error'); }
 }
 
 function openFundEntryModal(action) {

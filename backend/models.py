@@ -27,7 +27,7 @@ CASH_ACCOUNTS = [
     {
         'id': 'rc_dunnan',       'entity': 'RC',   'name': '國泰世華敦南（個人）',
         'category': '非投資',    'bank': '國泰世華',
-        'opening_balance': 1765594, 'is_static': False,
+        'opening_balance': 1385581, 'is_static': False,
     },
     {
         'id': 'rc_tuni',         'entity': 'RC',   'name': '國泰復興(統一)',

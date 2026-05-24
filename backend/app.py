@@ -216,14 +216,17 @@ def create_app():
                     trade_date = trade_date,
                 ).all()
                 for txn in saved_txns:
-                    is_buy        = txn.shares > 0
-                    cash_amount   = -txn.net_amount if is_buy else txn.net_amount
+                    is_buy      = txn.shares > 0
+                    cash_amount = -txn.net_amount if is_buy else txn.net_amount
+                    shares_lots = int(abs(txn.shares) / 1000) if abs(txn.shares) >= 1000 else abs(txn.shares)
+                    lots_unit   = '張' if abs(txn.shares) >= 1000 else '股'
+                    desc = f"{txn.security_code} {txn.security_name or ''} {shares_lots}{lots_unit} 成本{abs(round(txn.net_amount)):,}"
                     cash_acct.balance += cash_amount
                     ce = CashEntry(
                         account_id     = cash_acct_id,
                         entry_date     = trade_date,
                         entry_type     = '買入股票' if is_buy else '賣出股票',
-                        description    = txn.security_name or txn.security_code or '',
+                        description    = desc.strip(),
                         amount         = cash_amount,
                         balance_after  = cash_acct.balance,
                         security_code  = txn.security_code,
@@ -524,13 +527,26 @@ def create_app():
 
     @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
     def delete_transaction(txn_id):
-        """Delete a transaction and recalculate positions"""
+        """Delete a transaction, its linked cash entries, and recalculate."""
         txn    = Transaction.query.get_or_404(txn_id)
         entity = txn.entity
-        db.session.delete(txn)
-        db.session.commit()
-        recalculate_positions(entity)
-        return jsonify({'status': 'ok'})
+
+        linked_cash = CashEntry.query.filter_by(transaction_id=txn.id).all()
+        affected_cash_accounts = set(ce.account_id for ce in linked_cash)
+
+        try:
+            for ce in linked_cash:
+                db.session.delete(ce)
+            db.session.delete(txn)
+            db.session.flush()
+            for acct_id in affected_cash_accounts:
+                _recalculate_cash_balance(acct_id)
+            db.session.commit()
+            recalculate_positions(entity)
+            return jsonify({'status': 'ok', 'cash_entries_removed': len(linked_cash)})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
 
     # ── Securities lookup ────────────────────────────────────────────────────
     @app.route('/api/securities/lookup', methods=['GET'])
@@ -613,7 +629,15 @@ def create_app():
             return jsonify({'error': '靜態帳戶請直接更新餘額'}), 400
 
         # ── Validation ────────────────────────────────────────────────────
-        if entry_type == '轉出賬戶':
+        if entry_type == '其他收入':
+            if amount <= 0:
+                return jsonify({'error': '其他收入請填正數金額'}), 400
+
+        elif entry_type == '其他支出':
+            if amount >= 0:
+                return jsonify({'error': '其他支出請填負數金額'}), 400
+
+        elif entry_type == '轉出賬戶':
             target_id = data.get('target_account_id', '').strip()
             if not target_id:
                 return jsonify({'error': '請指定轉入帳戶'}), 400
@@ -622,6 +646,8 @@ def create_app():
                 return jsonify({'error': f'找不到轉入帳戶：{target_id}'}), 404
             if acct.entity != target.entity:
                 return jsonify({'error': '轉出賬戶只限同一實體（RC↔RC 或 華強↔華強）。跨實體請用借款'}), 400
+            if account_id == target_id:
+                return jsonify({'error': '轉出和轉入帳戶不能相同'}), 400
 
         elif entry_type in ('借款', '借款還款'):
             target_id = data.get('target_account_id', '').strip()
@@ -631,7 +657,7 @@ def create_app():
             if not target:
                 return jsonify({'error': f'找不到對方帳戶：{target_id}'}), 404
             if acct.entity == target.entity:
-                return jsonify({'error': '借款只限跨實體（RC↔華強）'}), 400
+                return jsonify({'error': '借款只限跨實體（RC↔華強）。同一實體請用轉出賬戶'}), 400
 
         elif entry_type in ('貸款', '貸款還款'):
             if 'private' not in acct.id:
@@ -705,6 +731,10 @@ def create_app():
         affected = set(e.account_id for e in to_delete)
 
         try:
+            # Break circular FK links first so DELETE doesn't fail
+            for e in to_delete:
+                e.linked_entry_id = None
+            db.session.flush()
             for e in to_delete:
                 db.session.delete(e)
             db.session.flush()
@@ -719,18 +749,29 @@ def create_app():
     # ── Edit cash entry ──────────────────────────────────────────────────────
     @app.route('/api/cash/entry/<int:entry_id>', methods=['PUT'])
     def edit_cash_entry(entry_id):
-        """Edit a manual cash entry (not auto-generated)."""
+        """Edit a manual cash entry. If linked (transfer/loan), syncs mirror amount too."""
         entry = CashEntry.query.get_or_404(entry_id)
         if entry.is_auto:
             return jsonify({'error': '自動產生的記錄不能手動編輯'}), 400
 
         data = request.json
+        affected = {entry.account_id}
         try:
-            if 'entry_date'   in data: entry.entry_date  = date.fromisoformat(data['entry_date'])
-            if 'description'  in data: entry.description = data['description']
-            if 'amount'       in data: entry.amount      = float(data['amount'])
+            old_amount = entry.amount
+            if 'entry_date'  in data: entry.entry_date  = date.fromisoformat(data['entry_date'])
+            if 'description' in data: entry.description = data['description']
+            if 'amount'      in data: entry.amount      = float(data['amount'])
+
+            # Sync mirror entry if linked
+            if 'amount' in data and entry.linked_entry_id:
+                mirror = CashEntry.query.get(entry.linked_entry_id)
+                if mirror:
+                    mirror.amount = -float(data['amount'])  # opposite sign
+                    affected.add(mirror.account_id)
+
             db.session.flush()
-            _recalculate_cash_balance(entry.account_id)
+            for acct_id in affected:
+                _recalculate_cash_balance(acct_id)
             db.session.commit()
             return jsonify({'status': 'ok'})
         except Exception as e:
@@ -791,7 +832,7 @@ def create_app():
             if action == '申購':
                 unit_cost  = float(data['unit_cost'])
                 units      = float(data['units'])
-                cost       = round(unit_cost * units)
+                cost       = round(unit_cost * units) - 1
                 cum_amount = prev_cum_amount + cost
                 cum_units  = prev_cum_units  + units
                 avg        = cum_amount / cum_units if cum_units else None
@@ -895,6 +936,37 @@ def create_app():
             q = q.filter_by(account_id=account_id)
         return jsonify([e.to_dict() for e in q.all()])
 
+    # ── Delete fund entry ────────────────────────────────────────────────────
+    @app.route('/api/cash/fund_entry/<int:entry_id>', methods=['DELETE'])
+    def delete_fund_entry(entry_id):
+        """Delete a fund entry and its linked cash entry. Recalculates balances."""
+        fe = FundEntry.query.get_or_404(entry_id)
+        affected = {fe.account_id}
+
+        # Find linked cash entry
+        linked_ce = None
+        if fe.linked_cash_entry_id:
+            linked_ce = CashEntry.query.get(fe.linked_cash_entry_id)
+            if linked_ce:
+                affected.add(linked_ce.account_id)
+
+        try:
+            if linked_ce:
+                linked_ce.linked_entry_id = None
+                db.session.flush()
+                db.session.delete(linked_ce)
+            db.session.delete(fe)
+            db.session.flush()
+
+            for acct_id in affected:
+                _recalculate_cash_balance(acct_id)
+
+            db.session.commit()
+            return jsonify({'status': 'ok'})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+
     return app
 
 
@@ -940,9 +1012,11 @@ def _seed_securities():
 
 
 def _seed_cash_accounts():
-    """Create CashAccount rows from config if they don't exist yet."""
+    """Create CashAccount rows from config if they don't exist yet.
+    Also patches known incorrect opening balances from earlier deploys."""
     for i, cfg in enumerate(CASH_ACCOUNTS):
-        if not CashAccount.query.get(cfg['id']):
+        existing = CashAccount.query.get(cfg['id'])
+        if not existing:
             db.session.add(CashAccount(
                 id              = cfg['id'],
                 entity          = cfg['entity'],
@@ -954,6 +1028,12 @@ def _seed_cash_accounts():
                 is_static       = cfg['is_static'],
                 sort_order      = i,
             ))
+        else:
+            # Patch rc_dunnan if it has the old incorrect opening balance
+            if cfg['id'] == 'rc_dunnan' and existing.opening_balance == 1765594:
+                diff = cfg['opening_balance'] - existing.opening_balance  # -380013
+                existing.opening_balance = cfg['opening_balance']
+                existing.balance = existing.balance + diff
     db.session.commit()
 
 
