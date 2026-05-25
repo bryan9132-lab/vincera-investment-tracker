@@ -528,6 +528,9 @@ def create_app():
                txn.to_dict())
         db.session.commit()
         recalculate_positions(entity)
+        return jsonify({'status': 'ok'})
+
+    @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
     def delete_transaction(txn_id):
         """Delete a transaction, its linked cash entries, and recalculate."""
         txn    = Transaction.query.get_or_404(txn_id)

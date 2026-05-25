@@ -188,7 +188,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" onclick="updatePrices()"><span id="price-btn-text">🔄 更新市價</span></button>
         <button class="btn btn-success" onclick="exportExcel()">⬇ 匯出 Excel</button>
-        <button class="btn btn-ghost" onclick="openAuditModal()" title="操作記錄">📋</button>
+        <button class="btn btn-ghost" onclick="openAuditModal()" title="操作記錄">📋 操作記錄</button>
       </div>
     </div>
 
@@ -511,8 +511,8 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <input type="text" id="ce-desc" placeholder="交易說明（選填）" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
     </div>
     <div class="modal-field">
-      <label>金額（正數=流入，負數=流出）</label>
-      <input type="number" id="ce-amount" placeholder="e.g. 500000 or -200000" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+      <label id="ce-amount-label">金額</label>
+      <input type="number" id="ce-amount" placeholder="e.g. 500000" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeCashEntryModal()">取消</button>
@@ -1362,11 +1362,28 @@ function onCashEntryTypeChange() {
   const type = document.getElementById('ce-type').value;
   const tgtField = document.getElementById('ce-target-field');
   const tgtLabel = document.getElementById('ce-target-label');
+  const amtLabel = document.getElementById('ce-amount-label');
+  const amtInput = document.getElementById('ce-amount');
   const needs = ['轉出賬戶','借款','借款還款'].includes(type);
-  tgtField.style.display = needs?'block':'none';
-  if(type==='轉出賬戶') tgtLabel.textContent='轉入帳戶';
-  else if(type==='借款') tgtLabel.textContent='借入帳戶';
-  else if(type==='借款還款') tgtLabel.textContent='還款帳戶';
+  tgtField.style.display = needs ? 'block' : 'none';
+  if(type==='轉出賬戶') tgtLabel.textContent = '轉入帳戶';
+  else if(type==='借款') tgtLabel.textContent = '借入帳戶';
+  else if(type==='借款還款') tgtLabel.textContent = '還款帳戶';
+
+  // Update amount label and placeholder based on type
+  if(['轉出賬戶','借款','借款還款','其他支出','貸款還款'].includes(type)) {
+    amtLabel.textContent = '金額（請填正數，系統自動處理方向）';
+    amtInput.placeholder = 'e.g. 500000';
+    amtInput.min = '0';
+  } else if(type === '其他收入' || type === '貸款') {
+    amtLabel.textContent = '金額（請填正數）';
+    amtInput.placeholder = 'e.g. 500000';
+    amtInput.min = '0';
+  } else {
+    amtLabel.textContent = '金額（正數=流入，負數=流出）';
+    amtInput.placeholder = 'e.g. 500000 or -200000';
+    amtInput.removeAttribute('min');
+  }
 }
 
 async function submitCashEntry() {
