@@ -1032,7 +1032,7 @@ def create_app():
             net_borrow = sum(e.amount for e in borrow_entries)
 
             priv_balance = priv_acc.balance if priv_acc else 0
-            net_own = priv_balance - net_loan
+            net_own = priv_balance  # balance already reflects loans received
 
             result[entity] = {
                 'loan':    round(net_loan),
