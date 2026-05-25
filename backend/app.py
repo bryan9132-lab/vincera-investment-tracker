@@ -1002,6 +1002,46 @@ def create_app():
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
+    # ── Loan summary ─────────────────────────────────────────────────────────
+    @app.route('/api/cash/loan_summary', methods=['GET'])
+    def get_loan_summary():
+        """
+        Returns 私銀貸款, 其他借款, and 私銀自有資金 for RC and 華強.
+        貸款 = sum of 貸款 entries minus 貸款還款 entries on private accounts
+        借款 = sum of 借款 entries minus 借款還款 entries (net position)
+        私銀自有資金 = private account balance - 貸款 net
+        """
+        result = {}
+        for entity in ['RC', '華強']:
+            priv_id  = 'rc_private' if entity == 'RC' else 'hq_private'
+            priv_acc = CashAccount.query.get(priv_id)
+
+            # Net 貸款 (bank loans)
+            loan_entries = CashEntry.query.filter_by(account_id=priv_id).all()
+            net_loan = sum(
+                e.amount for e in loan_entries
+                if e.entry_type in ('貸款', '貸款還款')
+            )
+
+            # Net 借款 (inter-entity loans) — find entries for this entity
+            entity_acct_ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
+            borrow_entries = CashEntry.query.filter(
+                CashEntry.account_id.in_(entity_acct_ids),
+                CashEntry.entry_type.in_(('借款', '借款還款'))
+            ).all()
+            net_borrow = sum(e.amount for e in borrow_entries)
+
+            priv_balance = priv_acc.balance if priv_acc else 0
+            net_own = priv_balance - net_loan
+
+            result[entity] = {
+                'loan':    round(net_loan),
+                'borrow':  round(net_borrow),
+                'net_own': round(net_own),
+            }
+
+        return jsonify(result)
+
     # ── Audit log ────────────────────────────────────────────────────────────
     @app.route('/api/audit_log', methods=['GET'])
     def get_audit_log():

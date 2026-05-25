@@ -1182,15 +1182,30 @@ function renderCashSummary(accounts) {
   updateLoanMatrix();
 }
 
-function updateLoanMatrix() {
-  const rcP = allCashAccounts.find(a=>a.id==='rc_private');
-  const hqP = allCashAccounts.find(a=>a.id==='hq_private');
-  document.getElementById('lm-rc-loan').textContent   = '—';
-  document.getElementById('lm-hq-loan').textContent   = '—';
-  document.getElementById('lm-rc-borrow').textContent = '—';
-  document.getElementById('lm-hq-borrow').textContent = '—';
-  document.getElementById('lm-rc-net').textContent    = rcP ? fmt(Math.round(rcP.balance||0)) : '—';
-  document.getElementById('lm-hq-net').textContent    = hqP ? fmt(Math.round(hqP.balance||0)) : '—';
+async function updateLoanMatrix() {
+  try {
+    const res  = await fetch(`${API}/api/cash/loan_summary`);
+    const data = await res.json();
+    const rc = data['RC']   || {};
+    const hq = data['華強'] || {};
+
+    document.getElementById('lm-rc-loan').textContent   = rc.loan   ? fmt(rc.loan)   : '—';
+    document.getElementById('lm-hq-loan').textContent   = hq.loan   ? fmt(hq.loan)   : '—';
+    document.getElementById('lm-rc-borrow').textContent = rc.borrow  ? fmt(rc.borrow) : '—';
+    document.getElementById('lm-hq-borrow').textContent = hq.borrow  ? fmt(hq.borrow) : '—';
+    document.getElementById('lm-rc-net').textContent    = fmt(rc.net_own ?? 0);
+    document.getElementById('lm-hq-net').textContent    = fmt(hq.net_own ?? 0);
+  } catch(e) {
+    // fallback: show private account balance only
+    const rcP = allCashAccounts.find(a => a.id === 'rc_private');
+    const hqP = allCashAccounts.find(a => a.id === 'hq_private');
+    document.getElementById('lm-rc-loan').textContent   = '—';
+    document.getElementById('lm-hq-loan').textContent   = '—';
+    document.getElementById('lm-rc-borrow').textContent = '—';
+    document.getElementById('lm-hq-borrow').textContent = '—';
+    document.getElementById('lm-rc-net').textContent    = rcP ? fmt(Math.round(rcP.balance||0)) : '—';
+    document.getElementById('lm-hq-net').textContent    = hqP ? fmt(Math.round(hqP.balance||0)) : '—';
+  }
 }
 
 // ── Cash Ledger ───────────────────────────────────────────────────────────────
