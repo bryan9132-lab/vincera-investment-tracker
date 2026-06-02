@@ -1143,17 +1143,28 @@ def create_app():
                 return txns
 
             def parse_private_rc(wb):
+                """私RC — date col A (index 0), fallback to previous row's date if A is None/invalid"""
                 ws = wb['(私RC)TWD']
                 txns = []
+                SKIP_CODES = {'買美金', '賣美金', '換匯', '匯款', '捐款'}
+                last_valid_date = None
                 for r in ws.iter_rows(values_only=True):
-                    if r[0] is None or not hasattr(r[0],'year') or r[0].year < 2000: continue
+                    # Get trade date: col A if valid, else use last known date
+                    if r[0] and hasattr(r[0],'year') and r[0].year > 2000:
+                        last_valid_date = r[0]
+                        td = r[0]
+                    else:
+                        td = last_valid_date  # carry forward previous date
+                    if td is None: continue
                     code = r[2]
                     if code is None: continue
-                    shares = safe_float(r[5])
-                    if not shares: continue
                     try: code_str = str(int(float(code))) if isinstance(code,(int,float)) else str(code).strip()
                     except: code_str = str(code).strip()
-                    txns.append({'trade_date':r[0].date(),'settle_date':r[1].date() if r[1] and hasattr(r[1],'date') else None,
+                    if code_str in SKIP_CODES: continue
+                    shares = safe_float(r[5])
+                    if not shares: continue
+                    txns.append({'trade_date': td.date(),
+                        'settle_date': r[1].date() if r[1] and hasattr(r[1],'date') and r[1].year > 2000 else None,
                         'entity':'私銀RC','broker':'國泰','account_no':'006439',
                         'security_code':code_str,'security_name':str(r[4]).strip() if r[4] else '',
                         'shares':shares,'price':safe_float(r[6]) or 0,'gross_amount':abs(safe_float(r[7]) or 0),
@@ -1161,19 +1172,34 @@ def create_app():
                 return txns
 
             def parse_private_hq(wb):
+                """私強 — date col C (index 2) or col D (index 3), fallback to previous row's date"""
                 ws = wb['(私強)進出明細TWD']
                 txns = []
+                SKIP_CODES = {'買美金', '賣美金', '換匯', '匯款', '貨款', '借款'}
+                SKIP_NAMES = {'期初金額', '資金調撥', '動撥款', '還款', '利息', '利息支出',
+                              '向RC借款', '國泰產險', '借華強', '元大交割帳戶入',
+                              'RC匯入', '轉入敦南', '轉入復興(統一證交割)', '賣美金買台幣',
+                              '統一交割入', '元大交割帳戶'}
+                last_valid_date = None
                 for r in ws.iter_rows(values_only=True):
-                    if r[2] is None or not hasattr(r[2],'year') or r[2].year < 2000: continue
+                    if r[2] and hasattr(r[2],'year') and r[2].year > 2000:
+                        last_valid_date = r[2]; td = r[2]
+                    elif r[3] and hasattr(r[3],'year') and r[3].year > 2000:
+                        last_valid_date = r[3]; td = r[3]
+                    else:
+                        td = last_valid_date
+                    if td is None: continue
                     code = r[4]
                     if code is None: continue
-                    name = str(r[6]).strip() if r[6] else ''
-                    if name == '期初金額': continue
-                    shares = safe_float(r[7])
-                    if not shares: continue
                     try: code_str = str(int(float(code))) if isinstance(code,(int,float)) else str(code).strip()
                     except: code_str = str(code).strip()
-                    txns.append({'trade_date':r[2].date(),'settle_date':r[3].date() if r[3] and hasattr(r[3],'date') else None,
+                    if code_str in SKIP_CODES: continue
+                    name = str(r[6]).strip() if r[6] else ''
+                    if name in SKIP_NAMES: continue
+                    shares = safe_float(r[7])
+                    if not shares: continue
+                    txns.append({'trade_date': td.date(),
+                        'settle_date': r[3].date() if r[3] and hasattr(r[3],'date') and r[3].year > 2000 else None,
                         'entity':'私銀華強','broker':'國泰','account_no':'007065',
                         'security_code':code_str,'security_name':name,
                         'shares':shares,'price':safe_float(r[8]) or 0,'gross_amount':abs(safe_float(r[9]) or 0),
