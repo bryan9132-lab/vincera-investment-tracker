@@ -1312,6 +1312,94 @@ def create_app():
             import traceback
             return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
+
+    # ── Positions split by broker (RC/華強 → 統一 + 元大) ────────────────────
+    @app.route('/api/positions/by_broker', methods=['GET'])
+    def get_positions_by_broker():
+        """
+        Returns positions grouped by account_no for RC and 華強,
+        so the frontend can show 統一 vs 元大 split.
+        Structure: { 'RC統一': [...], 'RC元大': [...], '華強統一': [...], '華強元大': [...],
+                     '私銀RC': [...], '私銀華強': [...] }
+        """
+        from .models import ACCOUNT_MAP
+        # account_no → broker_key label
+        BROKER_LABELS = {
+            '600826': 'RC統一',
+            '133376': 'RC元大',
+            '600885': '華強統一',
+            '133311': '華強元大',
+            '006439': '私銀RC',
+            '007065': '私銀華強',
+        }
+
+        # Replay transactions grouped by account_no
+        result = {label: {} for label in BROKER_LABELS.values()}
+
+        txns = (Transaction.query
+                .filter(Transaction.security_code.isnot(None))
+                .filter(Transaction.shares != 0)
+                .filter(Transaction.account_no.in_(BROKER_LABELS.keys()))
+                .order_by(Transaction.trade_date)
+                .all())
+
+        for txn in txns:
+            label = BROKER_LABELS.get(txn.account_no)
+            if not label: continue
+            code = txn.security_code
+            if code not in result[label]:
+                result[label][code] = {'shares': 0.0, 'total_cost': 0.0,
+                                       'security_name': txn.security_name or code}
+            h = result[label][code]
+            if txn.shares > 0:
+                h['shares']     += txn.shares
+                h['total_cost'] += txn.gross_amount + txn.fee
+            else:
+                if h['shares'] > 0:
+                    sell_qty   = abs(txn.shares)
+                    avg        = h['total_cost'] / h['shares']
+                    h['shares']     -= sell_qty
+                    h['total_cost'] -= avg * sell_qty
+                    if h['shares'] < 0.001:
+                        h['shares'] = 0
+                        h['total_cost'] = 0
+
+        # Enrich with live prices from Position table, format output
+        output = {}
+        for label, holdings in result.items():
+            positions = []
+            for code, h in holdings.items():
+                if h['shares'] < 0.001: continue
+                # Determine entity for Position lookup
+                entity_map = {
+                    'RC統一': 'RC', 'RC元大': 'RC',
+                    '華強統一': '華強', '華強元大': '華強',
+                    '私銀RC': '私銀RC', '私銀華強': '私銀華強',
+                }
+                entity = entity_map[label]
+                pos = Position.query.filter_by(entity=entity, security_code=code).first()
+                last_price = pos.last_price if pos else None
+                price_date = pos.price_date.isoformat() if pos and pos.price_date else None
+                shares     = round(h['shares'], 4)
+                total_cost = round(h['total_cost'], 4)
+                avg_cost   = round(total_cost / shares, 4) if shares else 0
+                market_val = round(last_price * shares, 0) if last_price else None
+                unreal_pnl = round(market_val - total_cost, 0) if market_val is not None else None
+                positions.append({
+                    'security_code': code,
+                    'security_name': h['security_name'],
+                    'shares':        shares,
+                    'total_cost':    total_cost,
+                    'avg_cost':      avg_cost,
+                    'last_price':    last_price,
+                    'price_date':    price_date,
+                    'market_value':  market_val,
+                    'unrealized_pnl': unreal_pnl,
+                })
+            output[label] = positions
+
+        return jsonify(output)
+
     # ── Audit log ────────────────────────────────────────────────────────────
     @app.route('/api/audit_log', methods=['GET'])
     def get_audit_log():

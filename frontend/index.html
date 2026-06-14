@@ -97,6 +97,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px}
 .toolbar-left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 select.filter-select{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-family:var(--font);font-size:13px}
+.broker-section{margin-bottom:8px}
+.broker-section-header{display:flex;align-items:center;gap:8px;padding:5px 0 4px 0;border-bottom:1px solid var(--border);margin-bottom:4px}
+.broker-tag{font-size:11px;font-weight:600;background:var(--surface2);color:var(--muted);padding:2px 8px;border-radius:10px;letter-spacing:.5px}
 .warning-box{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--warn);margin-bottom:14px}
 .meta-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 .meta-item{font-size:13px}
@@ -602,16 +605,18 @@ function switchTab(name) {
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
 async function loadHoldings() {
-  const [posRes, pnlRes] = await Promise.all([
+  const [posRes, brokerRes, pnlRes] = await Promise.all([
     fetch(`${API}/api/positions`),
+    fetch(`${API}/api/positions/by_broker`),
     fetch(`${API}/api/realized_pnl`),
   ]);
-  const positions   = await posRes.json();
-  const realizedPnl = await pnlRes.json();
-  renderHoldings(positions, realizedPnl);
+  const positions    = await posRes.json();
+  const byBroker     = await brokerRes.json();
+  const realizedPnl  = await pnlRes.json();
+  renderHoldings(positions, realizedPnl, byBroker);
 }
 
-function renderHoldings(data, realized) {
+function renderHoldings(data, realized, byBroker) {
   const labels = {'RC':'RC (元大+統一)','華強':'華強 (元大+統一)','私銀RC':'私RC (國泰)','私銀華強':'私強 (國泰)'};
 
   // ── P&L summary cards ──
@@ -631,54 +636,115 @@ function renderHoldings(data, realized) {
       </div>`;
   });
 
-  // ── 4 Fund boxes ──
+  // ── Fund boxes: RC/華強 split by broker; 私銀 unchanged ──
   const fundGrid = document.getElementById('fund-grid');
   fundGrid.innerHTML = '';
   const totals = {};
 
-  ENTITIES.forEach(ent => {
-    const positions = data[ent] || [];
-    const totalAmt  = positions.reduce((s,p) => s+(p.total_cost||0), 0);
-    totals[ent] = totalAmt;
-
-    let stocksHtml = '';
-    if(!positions.length) {
-      stocksHtml = `<div class="fund-empty">目前無持倉</div>`;
-    } else {
-      positions.forEach(p => {
-        const pnl = p.unrealized_pnl;
-        stocksHtml += `
-          <div class="stock-row">
-            <div class="stock-row-left">
-              <div class="stock-row-code">${p.security_code}</div>
-              <div class="stock-row-name">${p.security_name}</div>
-              <div class="stock-price">市價 ${p.last_price??'—'}</div>
-            </div>
-            <div class="stock-row-right">
-              <div class="stock-shares">${Math.round(p.shares/1000)} 張</div>
-              <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
-              <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
-              <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
-                ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'}
-              </div>
-            </div>
-          </div>`;
-      });
-    }
-
-    const totalPnl = positions.reduce((s,p) => s+(p.unrealized_pnl||0), 0);
-    const hasPx    = positions.some(p => p.last_price);
-    fundGrid.innerHTML += `
-      <div class="fund-block">
-        <div class="fund-header">
-          <div class="fund-name">${ent}</div>
-          <div class="fund-total">
-            ${hasPx ? `損益 <span class="${totalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(totalPnl))}</span>` : ''}
+  // Helper: render a list of positions as stock rows HTML
+  function stockRowsHtml(positions) {
+    if(!positions || !positions.length) return `<div class="fund-empty">目前無持倉</div>`;
+    return positions.map(p => {
+      const pnl = p.unrealized_pnl;
+      return `<div class="stock-row">
+        <div class="stock-row-left">
+          <div class="stock-row-code">${p.security_code}</div>
+          <div class="stock-row-name">${p.security_name}</div>
+          <div class="stock-price">市價 ${p.last_price??'—'}</div>
+        </div>
+        <div class="stock-row-right">
+          <div class="stock-shares">${Math.round(p.shares/1000)} 張</div>
+          <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
+          <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
+          <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
+            ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'}
           </div>
         </div>
-        <div class="fund-stocks">${stocksHtml}</div>
       </div>`;
-  });
+    }).join('');
+  }
+
+  // Helper: broker sub-section header
+  function brokerSection(brokerLabel, positions) {
+    const totalPnl = positions.reduce((s,p)=>s+(p.unrealized_pnl||0),0);
+    const hasPx    = positions.some(p=>p.last_price);
+    const amt      = positions.reduce((s,p)=>s+(p.total_cost||0),0);
+    return `<div class="broker-section">
+      <div class="broker-section-header">
+        <span class="broker-tag">${brokerLabel}</span>
+        ${hasPx?`<span class="${totalPnl>=0?'positive':'negative'}" style="font-size:12px">${fmtPnl(Math.round(totalPnl))}</span>`:''}
+      </div>
+      ${stockRowsHtml(positions)}
+    </div>`;
+  }
+
+  // RC — split into 統一 + 元大
+  const rcTuni  = byBroker['RC統一']  || [];
+  const rcYuant = byBroker['RC元大']  || [];
+  const rcAll   = data['RC'] || [];
+  totals['RC']  = rcAll.reduce((s,p)=>s+(p.total_cost||0),0);
+  const rcTotalPnl = rcAll.reduce((s,p)=>s+(p.unrealized_pnl||0),0);
+  const rcHasPx    = rcAll.some(p=>p.last_price);
+  fundGrid.innerHTML += `
+    <div class="fund-block">
+      <div class="fund-header">
+        <div class="fund-name">RC</div>
+        <div class="fund-total">${rcHasPx?`損益 <span class="${rcTotalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(rcTotalPnl))}</span>`:''}</div>
+      </div>
+      <div class="fund-stocks">
+        ${rcTuni.length  ? brokerSection('統一', rcTuni)  : ''}
+        ${rcYuant.length ? brokerSection('元大', rcYuant) : ''}
+        ${(!rcTuni.length && !rcYuant.length) ? '<div class="fund-empty">目前無持倉</div>' : ''}
+      </div>
+    </div>`;
+
+  // 私銀RC — unchanged
+  const prcAll = data['私銀RC'] || [];
+  totals['私銀RC'] = prcAll.reduce((s,p)=>s+(p.total_cost||0),0);
+  const prcTotalPnl = prcAll.reduce((s,p)=>s+(p.unrealized_pnl||0),0);
+  const prcHasPx    = prcAll.some(p=>p.last_price);
+  fundGrid.innerHTML += `
+    <div class="fund-block">
+      <div class="fund-header">
+        <div class="fund-name">私銀RC</div>
+        <div class="fund-total">${prcHasPx?`損益 <span class="${prcTotalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(prcTotalPnl))}</span>`:''}</div>
+      </div>
+      <div class="fund-stocks">${stockRowsHtml(prcAll)}</div>
+    </div>`;
+
+  // 華強 — split into 統一 + 元大
+  const hqTuni  = byBroker['華強統一'] || [];
+  const hqYuant = byBroker['華強元大'] || [];
+  const hqAll   = data['華強'] || [];
+  totals['華強'] = hqAll.reduce((s,p)=>s+(p.total_cost||0),0);
+  const hqTotalPnl = hqAll.reduce((s,p)=>s+(p.unrealized_pnl||0),0);
+  const hqHasPx    = hqAll.some(p=>p.last_price);
+  fundGrid.innerHTML += `
+    <div class="fund-block">
+      <div class="fund-header">
+        <div class="fund-name">華強</div>
+        <div class="fund-total">${hqHasPx?`損益 <span class="${hqTotalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(hqTotalPnl))}</span>`:''}</div>
+      </div>
+      <div class="fund-stocks">
+        ${hqTuni.length  ? brokerSection('統一', hqTuni)  : ''}
+        ${hqYuant.length ? brokerSection('元大', hqYuant) : ''}
+        ${(!hqTuni.length && !hqYuant.length) ? '<div class="fund-empty">目前無持倉</div>' : ''}
+      </div>
+    </div>`;
+
+  // 私銀華強 — unchanged
+  const phqAll = data['私銀華強'] || [];
+  totals['私銀華強'] = phqAll.reduce((s,p)=>s+(p.total_cost||0),0);
+  const phqTotalPnl = phqAll.reduce((s,p)=>s+(p.unrealized_pnl||0),0);
+  const phqHasPx    = phqAll.some(p=>p.last_price);
+  fundGrid.innerHTML += `
+    <div class="fund-block">
+      <div class="fund-header">
+        <div class="fund-name">私銀華強</div>
+        <div class="fund-total">${phqHasPx?`損益 <span class="${phqTotalPnl>=0?'positive':'negative'}">${fmtPnl(Math.round(phqTotalPnl))}</span>`:''}</div>
+      </div>
+      <div class="fund-stocks">${stockRowsHtml(phqAll)}</div>
+    </div>`;
 
   // Totals bar
   const bar = document.getElementById('totals-bar');
