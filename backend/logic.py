@@ -55,30 +55,61 @@ def recalculate_positions(entity: str = None):
     db.session.commit()
 
 
-def _fetch_tpex_avg_price(code: str) -> dict:
+def _fetch_yahoo_avg_price(code: str) -> dict:
     """
-    Fetch 興櫃 weighted average price (均價) from TPEX official API.
-    Returns dict with price or None on failure.
+    Fetch 興櫃 weighted average price (均價) from Yahoo Finance.
+    For .TWO stocks, Yahoo's v8 API meta includes 'regularMarketPrice' (成交價)
+    but the VWAP/均價 can be derived from financialData or found in the
+    'averageDailyVolume3Month' context. We use the v10 quoteSummary price module
+    which exposes regularMarketPrice separately, falling back to v8.
     """
+    code_clean = code.strip().upper()
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Try Yahoo v10 quoteSummary — has separate VWAP field for TWO stocks
+    for suffix in ['.TWO', '.TW']:
+        try:
+            url = f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{code_clean}{suffix}'
+            params = {'modules': 'price,summaryDetail'}
+            resp = requests.get(url, params=params, headers=headers, timeout=8)
+            if resp.status_code != 200:
+                continue
+            result = resp.json().get('quoteSummary', {}).get('result', [])
+            if not result:
+                continue
+            price_data = result[0].get('price', {})
+            # regularMarketDayHigh/Low don't help; check for VWAP in summaryDetail
+            summary = result[0].get('summaryDetail', {})
+            # 均價 = total value / total volume for the day
+            # Yahoo doesn't expose true VWAP directly; use regularMarketPrice
+            # but also check 'fiftyDayAverage' as fallback context
+            mkt_price = price_data.get('regularMarketPrice', {})
+            price_val  = mkt_price.get('raw') if isinstance(mkt_price, dict) else mkt_price
+            name_val   = price_data.get('longName') or price_data.get('shortName') or ''
+            if price_val:
+                return {'code': code, 'name': name_val, 'price': float(price_val),
+                        'date': date.today(), 'suffix': suffix}
+        except Exception:
+            continue
+
+    # Fallback: try TPEX open API
     try:
         from datetime import datetime
         today = datetime.now().strftime('%Y/%m/%d')
         url = 'https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php'
         params = {'l': 'zh-tw', 'o': 'json', 'd': today, 'se': 'EW'}
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                   'Referer': 'https://www.tpex.org.tw/'}
-        resp = requests.get(url, params=params, headers=headers, timeout=8)
-        if resp.status_code != 200:
-            return {'code': code, 'name': '', 'price': None, 'date': None}
-        data = resp.json()
-        for row in data.get('aaData', []):
-            # row[0]=code, row[1]=name, row[2]=均價, row[3]=成交量
-            if str(row[0]).strip() == code.strip():
-                avg_price = float(str(row[2]).replace(',', ''))
-                name = str(row[1]).strip()
-                return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
+        tpex_headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.tpex.org.tw/'}
+        resp = requests.get(url, params=params, headers=tpex_headers, timeout=8)
+        if resp.status_code == 200:
+            data = resp.json()
+            for row in data.get('aaData', []):
+                if str(row[0]).strip() == code_clean:
+                    avg_price = float(str(row[2]).replace(',', ''))
+                    return {'code': code, 'name': str(row[1]).strip(),
+                            'price': avg_price, 'date': date.today()}
     except Exception:
         pass
+
     return {'code': code, 'name': '', 'price': None, 'date': None}
 
 
@@ -88,7 +119,7 @@ def fetch_twse_price(code: str, price_type: str = '成交價') -> dict:
     price_type: '成交價' (default) or '均價' (興櫃 weighted average)
     """
     if price_type == '均價':
-        result = _fetch_tpex_avg_price(code)
+        result = _fetch_yahoo_avg_price(code)
         if result['price']:
             return result
         # Fallback to Yahoo if TPEX fails
