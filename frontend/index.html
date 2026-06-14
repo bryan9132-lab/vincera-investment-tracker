@@ -630,7 +630,7 @@ async function setPriceType(code, ptype) {
   });
   if(res.ok) {
     securityPriceTypes[code] = ptype;
-    toast(`✅ ${code} 已設為${ptype}`, 'success');
+    toast(`✅ ${code} 已設為${ptype}，下次更新市價時生效`, 'success');
   }
 }
 
@@ -1386,13 +1386,24 @@ function renderLedgerTable(entries) {
     const isIn    = e.amount >= 0;
     const badge   = entryTypeBadge(e.entry_type);
     const autoTag = e.is_auto ? '<span style="font-size:10px;color:var(--muted);margin-left:4px">自動</span>' : '';
-    const acctCell = acctName[e.account_id] || e.account_id;
+
+    // For 股東往來, extract [X→Y] entity label from description and show in account cells
+    let desc = e.description || '—';
+    let entityLabel = '';
+    let counterpartEntityLabel = '';
+    const entityMatch = desc.match(/^\[([^\]]+)→([^\]]+)\]\s*/);
+    if(entityMatch && e.entry_type && e.entry_type.includes('股東往來')) {
+      entityLabel = `<span style="font-size:10px;font-weight:600;color:var(--accent);margin-left:4px">[${entityMatch[1]}]</span>`;
+      counterpartEntityLabel = `<span style="font-size:10px;font-weight:600;color:var(--accent);margin-left:4px">[${entityMatch[2]}]</span>`;
+      desc = desc.replace(/^\[[^\]]+→[^\]]+\]\s*/, '') || '—';
+    }
+    const acctCell = (acctName[e.account_id] || e.account_id) + entityLabel;
 
     // 對方帳戶: find mirror entry's account
     let counterpart = '—';
     if(e.linked_entry_id) {
       const mirror = allLedgerEntries.find(x => x.id === e.linked_entry_id);
-      if(mirror) counterpart = acctName[mirror.account_id] || mirror.account_id;
+      if(mirror) counterpart = (acctName[mirror.account_id] || mirror.account_id) + counterpartEntityLabel;
     }
 
     const editBtn = e.is_auto ? '' :
@@ -1403,7 +1414,7 @@ function renderLedgerTable(entries) {
       <td class="left">${e.entry_date}</td>
       <td class="left" style="font-size:12px;color:var(--muted)">${acctCell}</td>
       <td class="left">${badge}${autoTag}</td>
-      <td class="left" id="desc-cell-${e.id}">${e.description||'—'}</td>
+      <td class="left" id="desc-cell-${e.id}">${desc}</td>
       <td class="left" style="font-size:12px;color:var(--muted)">${counterpart}</td>
       <td class="${isIn?'positive':'negative'}" id="amt-cell-${e.id}">${isIn?'+':''}${fmt(Math.round(e.amount))}</td>
       <td>${fmt(Math.round(e.balance_after))}</td>
