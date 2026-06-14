@@ -330,6 +330,9 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <select id="filter-month" class="filter-select" onchange="applyMonthFilter()">
           <option value="">全部月份</option>
         </select>
+        <select id="filter-security" class="filter-select" onchange="applyMonthFilter()">
+          <option value="">全部股票</option>
+        </select>
         <button class="btn btn-success btn-sm" onclick="exportHistory()">⬇ 匯出記錄</button>
       </div>
       <div style="font-size:12px;color:var(--muted)" id="history-count"></div>
@@ -908,11 +911,19 @@ async function loadHistory(){
   const curVal=monthSel.value;
   monthSel.innerHTML='<option value="">全部月份</option>';
   months.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===curVal)o.selected=true;monthSel.appendChild(o);});
+  // Populate stock filter
+  const secSel=document.getElementById('filter-security');
+  const curSec=secSel.value;
+  const securities=[...new Map(allHistoryTxns.filter(t=>t.security_code).map(t=>[t.security_code,t.security_name||t.security_code])).entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+  secSel.innerHTML='<option value="">全部股票</option>';
+  securities.forEach(([code,name])=>{const o=document.createElement('option');o.value=code;o.textContent=`${code} ${name}`;if(code===curSec)o.selected=true;secSel.appendChild(o);});
   applyMonthFilter();
 }
 function applyMonthFilter(){
   const month=document.getElementById('filter-month').value;
-  const txns=month?allHistoryTxns.filter(t=>t.trade_date.startsWith(month)):allHistoryTxns;
+  const security=document.getElementById('filter-security').value;
+  let txns=month?allHistoryTxns.filter(t=>t.trade_date.startsWith(month)):allHistoryTxns;
+  if(security) txns=txns.filter(t=>t.security_code===security);
   document.getElementById('history-count').textContent=`共 ${txns.length} 筆`;
   renderHistoryTable(txns);
 }

@@ -223,8 +223,9 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
         r'([\d,]+)\s+'            # shares
         r'([\d,\.]+)\s+'          # price
         r'([\d,]+)\s+'            # gross
-        r'([\d,]+)'               # fee
-        r'(?:[\s\d,]+?)'          # skip optional fields (非貪婪)
+        r'([\d,]+)\s+'            # fee
+        r'([\d,]+)'               # 交易稅 (證交稅)
+        r'(?:[\s\d,]+?)'          # skip 證所稅, 利息 (非貪婪)
         r'([\d,]{5,})\([收付]\)'  # net amount (min 5 chars)
     )
 
@@ -235,8 +236,8 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
         price  = _clean_number(m.group(5))
         gross  = _clean_number(m.group(6))
         fee    = _clean_number(m.group(7))
-        tax    = 0.0  # extracted separately below if needed
-        net    = _clean_number(m.group(8))
+        tax    = _clean_number(m.group(8))   # 交易稅 from PDF
+        net    = _clean_number(m.group(9))
 
         if action in ('集賣', 'OT賣'):
             shares = -shares
