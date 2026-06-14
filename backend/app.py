@@ -336,7 +336,9 @@ def create_app():
             shares = float(t.get('shares', 0))
             price  = float(t.get('price', 0))
             gross  = abs(shares) * price
-            fee    = round(gross * 0.001425 * 0.6)  # ~0.1425% discounted rate
+            FEE_RATES = {'統一': 0.00036477, '元大': 0.000625, '國泰': 0.00042465}
+            fee_rate = FEE_RATES.get(mapping['broker'], 0.001425)
+            fee    = round(gross * fee_rate)  # 小數點四捨五入
             tax    = round(gross * 0.003) if shares < 0 else 0
             net    = gross - fee - tax
 
@@ -456,11 +458,14 @@ def create_app():
         limit      = int(request.args.get('limit', 100))
 
         q = Transaction.query.order_by(Transaction.trade_date.desc())
-        broker_f   = request.args.get('broker')
+        broker_f      = request.args.get('broker')
+        security_f    = request.args.get('security_code')
         if entity:
             q = q.filter_by(entity=entity)
         if broker_f:
             q = q.filter_by(broker=broker_f)
+        if security_f:
+            q = q.filter(Transaction.security_code == security_f)
         if start_date:
             q = q.filter(Transaction.trade_date >= date.fromisoformat(start_date))
         if end_date:
@@ -695,17 +700,26 @@ def create_app():
                 return jsonify({'error': '貸款功能只限私銀帳戶'}), 400
 
         try:
-            if entry_type in ('轉出賬戶', '借款', '借款還款'):
+            if entry_type in ('轉出賬戶', '股東往來（借）', '股東往來（還）'):
                 target  = CashAccount.query.get(data['target_account_id'])
                 out_amt = -abs(amount)
                 in_amt  =  abs(amount)
+
+                # For 股東往來, prefix entity names so Sophie can see who→who
+                if entry_type in ('股東往來（借）', '股東往來（還）'):
+                    entity_label = f'[{acct.entity}→{target.entity}]'
+                    out_desc = f'{entity_label} {description}'.strip() if description else entity_label
+                    in_desc  = out_desc
+                else:
+                    out_desc = description or f'轉入{target.name}'
+                    in_desc  = description or f'來自{acct.name}'
 
                 acct.balance += out_amt
                 e_out = CashEntry(
                     account_id    = account_id,
                     entry_date    = entry_date,
                     entry_type    = entry_type,
-                    description   = description or f'轉入{target.name}',
+                    description   = out_desc,
                     amount        = out_amt,
                     balance_after = acct.balance,
                 )
@@ -717,7 +731,7 @@ def create_app():
                     account_id      = target.id,
                     entry_date      = entry_date,
                     entry_type      = entry_type,
-                    description     = description or f'來自{acct.name}',
+                    description     = in_desc,
                     amount          = in_amt,
                     balance_after   = target.balance,
                     linked_entry_id = e_out.id,
@@ -1027,17 +1041,25 @@ def create_app():
             entity_acct_ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
             borrow_entries = CashEntry.query.filter(
                 CashEntry.account_id.in_(entity_acct_ids),
-                CashEntry.entry_type.in_(('借款', '借款還款'))
+                CashEntry.entry_type.in_(('股東往來（借）', '股東往來（還）'))
             ).all()
             net_borrow = sum(e.amount for e in borrow_entries)
 
-            priv_balance = priv_acc.balance if priv_acc else 0
-            net_own = priv_balance  # balance already reflects loans received
+            # 華強 has a historical 3M loan from RC not yet in DB — hardcode the floor
+            if entity == '華強' and net_borrow > -3000000:
+                net_borrow = -3000000
+
+            # 調度至私銀資金: hardcoded capital ever transferred into 私銀
+            # (only changes if new funds are moved from external accounts into 私銀)
+            TRANSFERRED_TO_PRIVATE = {
+                'RC':   43030000,
+                '華強': 13470000,
+            }
 
             result[entity] = {
                 'loan':    round(net_loan),
                 'borrow':  round(net_borrow),
-                'net_own': round(net_own),
+                'net_own': TRANSFERRED_TO_PRIVATE[entity],
             }
 
         return jsonify(result)

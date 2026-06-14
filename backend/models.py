@@ -125,8 +125,8 @@ CASH_ENTRY_TYPES = [
     '贖回基金',    # fund redemption (fund accounts only) → also credits private account
     '貸款',        # bank loan (私銀accounts only)
     '貸款還款',    # loan repayment (私銀accounts only)
-    '借款',        # inter-entity loan (RC↔華強 only)
-    '借款還款',    # inter-entity loan repayment (RC↔華強 only)
+    '股東往來（借）',   # inter-entity loan (RC↔華強 only)
+    '股東往來（還）',   # inter-entity loan repayment (RC↔華強 only)
     '其他收入',    # manual misc credit
     '其他支出',    # manual misc debit
 ]
