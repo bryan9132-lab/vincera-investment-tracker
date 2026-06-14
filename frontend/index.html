@@ -1121,7 +1121,11 @@ function calcManualFee(i) {
   const dir    = parseInt(document.getElementById(`mr-dir-${i}`)?.value || 1);
   if(!zhang || !price) return;
   const gross = zhang * 1000 * price;
-  document.getElementById(`mr-fee-${i}`).value = Math.round(gross * 0.001425 * 0.6);
+  const acct  = document.getElementById('manual-account')?.value || '';
+  const FEE_RATES = {'600826':0.00036477,'133376':0.000625,'600885':0.00036477,
+                     '133311':0.000625,'006439':0.00042465,'007065':0.00042465};
+  const rate = FEE_RATES[acct] || 0.001425;
+  document.getElementById(`mr-fee-${i}`).value = Math.round(gross * rate);
   document.getElementById(`mr-tax-${i}`).value = dir < 0 ? Math.round(gross * 0.003) : 0;
 }
 
