@@ -137,16 +137,18 @@ CASH_ENTRY_TYPES = [
 # ══════════════════════════════════════════════════════════════════════════════
 
 class Security(db.Model):
-    """Stock/security master — code, name, region"""
+    """Stock/security master — code, name, region, price_type"""
     __tablename__ = 'securities'
 
     code        = db.Column(db.String(20),  primary_key=True)
     name        = db.Column(db.String(100), nullable=False)
     region      = db.Column(db.String(10),  default='T')
+    price_type  = db.Column(db.String(10),  default='成交價')  # '成交價' or '均價' (興櫃)
     created_at  = db.Column(db.DateTime,    default=datetime.utcnow)
 
     def to_dict(self):
-        return {'code': self.code, 'name': self.name, 'region': self.region}
+        return {'code': self.code, 'name': self.name, 'region': self.region,
+                'price_type': self.price_type or '成交價'}
 
 
 class Transaction(db.Model):

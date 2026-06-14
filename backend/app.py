@@ -47,6 +47,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _migrate_add_price_type()
         _seed_securities()
         _seed_cash_accounts()
 
@@ -1400,6 +1401,29 @@ def create_app():
 
         return jsonify(output)
 
+
+    # ── Update security price_type (成交價 / 均價) ────────────────────────────
+    @app.route('/api/securities/<code>/price_type', methods=['PUT'])
+    def update_price_type(code):
+        """Sophie sets whether a stock uses 成交價 or 均價 (興櫃)."""
+        data  = request.json
+        ptype = data.get('price_type', '成交價')
+        if ptype not in ('成交價', '均價'):
+            return jsonify({'error': '無效的 price_type'}), 400
+        sec = Security.query.get(code)
+        if not sec:
+            return jsonify({'error': f'找不到股票：{code}'}), 404
+        sec.price_type = ptype
+        db.session.commit()
+        return jsonify({'status': 'ok', 'code': code, 'price_type': ptype})
+
+    # ── Get all securities with price_type ───────────────────────────────────
+    @app.route('/api/securities', methods=['GET'])
+    def get_securities():
+        """Return all securities (for price_type management)."""
+        secs = Security.query.order_by(Security.code).all()
+        return jsonify([s.to_dict() for s in secs])
+
     # ── Audit log ────────────────────────────────────────────────────────────
     @app.route('/api/audit_log', methods=['GET'])
     def get_audit_log():
@@ -1427,6 +1451,18 @@ def _recalculate_cash_balance(account_id):
         running += e.amount
         e.balance_after = running
     acct.balance = running
+
+
+
+def _migrate_add_price_type():
+    """Add price_type column to securities table if it doesn't exist yet."""
+    try:
+        db.session.execute(db.text(
+            "ALTER TABLE securities ADD COLUMN IF NOT EXISTS price_type VARCHAR(10) DEFAULT '成交價'"
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _seed_securities():

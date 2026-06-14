@@ -100,6 +100,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
 .broker-section{margin-bottom:8px}
 .broker-section-header{display:flex;align-items:center;gap:8px;padding:5px 0 4px 0;border-bottom:1px solid var(--border);margin-bottom:4px}
 .broker-tag{font-size:11px;font-weight:600;background:var(--surface2);color:var(--muted);padding:2px 8px;border-radius:10px;letter-spacing:.5px}
+.price-type-sel{font-size:10px;padding:1px 4px;border-radius:6px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);cursor:pointer;font-family:var(--font)}
 .warning-box{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--warn);margin-bottom:14px}
 .meta-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 .meta-item{font-size:13px}
@@ -385,7 +386,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         </tr></thead>
         <tbody>
           <tr><td class="left">私銀貸款</td><td id="lm-rc-loan">—</td><td id="lm-hq-loan">—</td></tr>
-          <tr><td class="left">其他借款</td><td id="lm-rc-borrow">—</td><td id="lm-hq-borrow">—</td></tr>
+          <tr><td class="left">股東往來</td><td id="lm-rc-borrow">—</td><td id="lm-hq-borrow">—</td></tr>
           <tr style="font-weight:700"><td class="left">私銀自有資金</td><td id="lm-rc-net">—</td><td id="lm-hq-net">—</td></tr>
         </tbody>
       </table>
@@ -497,8 +498,8 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
           <option value="其他收入">其他收入</option>
           <option value="其他支出">其他支出</option>
           <option value="轉出賬戶">轉出賬戶</option>
-          <option value="借款">借款</option>
-          <option value="借款還款">借款還款</option>
+          <option value="股東往來（借）">股東往來（借）</option>
+          <option value="股東往來（還）">股東往來（還）</option>
           <option value="貸款">貸款</option>
           <option value="貸款還款">貸款還款</option>
         </select>
@@ -604,16 +605,33 @@ function switchTab(name) {
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
+let securityPriceTypes = {};  // code → '成交價' | '均價'
+
 async function loadHoldings() {
-  const [posRes, brokerRes, pnlRes] = await Promise.all([
+  const [posRes, brokerRes, pnlRes, secRes] = await Promise.all([
     fetch(`${API}/api/positions`),
     fetch(`${API}/api/positions/by_broker`),
     fetch(`${API}/api/realized_pnl`),
+    fetch(`${API}/api/securities`),
   ]);
   const positions    = await posRes.json();
   const byBroker     = await brokerRes.json();
   const realizedPnl  = await pnlRes.json();
+  const securities   = await secRes.json();
+  securityPriceTypes = {};
+  securities.forEach(s => { securityPriceTypes[s.code] = s.price_type || '成交價'; });
   renderHoldings(positions, realizedPnl, byBroker);
+}
+
+async function setPriceType(code, ptype) {
+  const res = await fetch(`${API}/api/securities/${code}/price_type`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({price_type: ptype})
+  });
+  if(res.ok) {
+    securityPriceTypes[code] = ptype;
+    toast(`✅ ${code} 已設為${ptype}`, 'success');
+  }
 }
 
 function renderHoldings(data, realized, byBroker) {
@@ -645,12 +663,20 @@ function renderHoldings(data, realized, byBroker) {
   function stockRowsHtml(positions) {
     if(!positions || !positions.length) return `<div class="fund-empty">目前無持倉</div>`;
     return positions.map(p => {
-      const pnl = p.unrealized_pnl;
+      const pnl   = p.unrealized_pnl;
+      const ptype = securityPriceTypes[p.security_code] || '成交價';
       return `<div class="stock-row">
         <div class="stock-row-left">
           <div class="stock-row-code">${p.security_code}</div>
           <div class="stock-row-name">${p.security_name}</div>
-          <div class="stock-price">市價 ${p.last_price??'—'}</div>
+          <div class="stock-price" style="display:flex;align-items:center;gap:6px">
+            <span>市價 ${p.last_price??'—'}</span>
+            <select class="price-type-sel" onchange="setPriceType('${p.security_code}',this.value)"
+              title="更新市價時使用的價格類型">
+              <option value="成交價" ${ptype==='成交價'?'selected':''}>成交價</option>
+              <option value="均價"   ${ptype==='均價'?'selected':''}>均價(興櫃)</option>
+            </select>
+          </div>
         </div>
         <div class="stock-row-right">
           <div class="stock-shares">${Math.round(p.shares/1000)} 張</div>
@@ -1418,7 +1444,7 @@ function entryTypeBadge(type) {
   const cls = type==='買入股票'?'etype-buy':type==='賣出股票'?'etype-sell':
     type==='轉出賬戶'?'etype-transfer':
     (type==='申購基金'||type==='贖回基金')?'etype-fund':
-    (type==='貸款'||type==='貸款還款'||type==='借款'||type==='借款還款')?'etype-loan':'etype-other';
+    (type==='貸款'||type==='貸款還款'||type==='股東往來（借）'||type==='股東往來（還）')?'etype-loan':'etype-other';
   return `<span class="etype ${cls}">${type}</span>`;
 }
 
@@ -1460,14 +1486,14 @@ function onCashEntryTypeChange() {
   const tgtLabel = document.getElementById('ce-target-label');
   const amtLabel = document.getElementById('ce-amount-label');
   const amtInput = document.getElementById('ce-amount');
-  const needs = ['轉出賬戶','借款','借款還款'].includes(type);
+  const needs = ['轉出賬戶','股東往來（借）','股東往來（還）'].includes(type);
   tgtField.style.display = needs ? 'block' : 'none';
   if(type==='轉出賬戶') tgtLabel.textContent = '轉入帳戶';
-  else if(type==='借款') tgtLabel.textContent = '借入帳戶';
-  else if(type==='借款還款') tgtLabel.textContent = '還款帳戶';
+  else if(type==='股東往來（借）') tgtLabel.textContent = '借入帳戶';
+  else if(type==='股東往來（還）') tgtLabel.textContent = '還款帳戶';
 
   // Update amount label and placeholder based on type
-  if(['轉出賬戶','借款','借款還款','其他支出','貸款還款'].includes(type)) {
+  if(['轉出賬戶','股東往來（借）','股東往來（還）','其他支出','貸款還款'].includes(type)) {
     amtLabel.textContent = '金額（請填正數，系統自動處理方向）';
     amtInput.placeholder = 'e.g. 500000';
     amtInput.min = '0';
@@ -1491,7 +1517,7 @@ async function submitCashEntry() {
   if(!date_)    { toast('請填入日期','error'); return; }
   if(isNaN(amount)){ toast('請填入金額','error'); return; }
   const body = {account_id:acctId, entry_date:date_, entry_type:type, description:desc, amount};
-  if(['轉出賬戶','借款','借款還款'].includes(type))
+  if(['轉出賬戶','股東往來（借）','股東往來（還）'].includes(type))
     body.target_account_id = document.getElementById('ce-target').value;
   try {
     const res  = await fetch(`${API}/api/cash/entry`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

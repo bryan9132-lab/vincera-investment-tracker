@@ -55,8 +55,44 @@ def recalculate_positions(entity: str = None):
     db.session.commit()
 
 
-def fetch_twse_price(code: str) -> dict:
-    """Fetch price via Yahoo Finance — works globally, no IP restrictions."""
+def _fetch_tpex_avg_price(code: str) -> dict:
+    """
+    Fetch 興櫃 weighted average price (均價) from TPEX official API.
+    Returns dict with price or None on failure.
+    """
+    try:
+        from datetime import datetime
+        today = datetime.now().strftime('%Y/%m/%d')
+        url = 'https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php'
+        params = {'l': 'zh-tw', 'o': 'json', 'd': today, 'se': 'EW'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                   'Referer': 'https://www.tpex.org.tw/'}
+        resp = requests.get(url, params=params, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return {'code': code, 'name': '', 'price': None, 'date': None}
+        data = resp.json()
+        for row in data.get('aaData', []):
+            # row[0]=code, row[1]=name, row[2]=均價, row[3]=成交量
+            if str(row[0]).strip() == code.strip():
+                avg_price = float(str(row[2]).replace(',', ''))
+                name = str(row[1]).strip()
+                return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
+    except Exception:
+        pass
+    return {'code': code, 'name': '', 'price': None, 'date': None}
+
+
+def fetch_twse_price(code: str, price_type: str = '成交價') -> dict:
+    """
+    Fetch price via Yahoo Finance (成交價) or TPEX (均價 for 興櫃).
+    price_type: '成交價' (default) or '均價' (興櫃 weighted average)
+    """
+    if price_type == '均價':
+        result = _fetch_tpex_avg_price(code)
+        if result['price']:
+            return result
+        # Fallback to Yahoo if TPEX fails
+
     code_clean = code.strip().upper()
     for suffix in ['.TW', '.TWO']:
         try:
@@ -88,8 +124,9 @@ def update_all_prices():
                .filter(Position.shares > 0).distinct().all()]
     results = []
     for code in codes:
-        fetch  = fetch_twse_price(code)
         sec    = Security.query.get(code)
+        ptype  = (sec.price_type or '成交價') if sec else '成交價'
+        fetch  = fetch_twse_price(code, price_type=ptype)
         old_px = None
         for pos in Position.query.filter_by(security_code=code).all():
             old_px = pos.last_price
