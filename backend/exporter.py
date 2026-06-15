@@ -11,7 +11,7 @@ from .logic import calculate_realized_pnl
 ENTITIES = ['RC', '華強', '私銀RC', '私銀華強']
 
 def _s(ws, row, col, value=None, bold=False, fill=None, num_fmt=None,
-       align='right', font_size=9, color='000000', border=None):
+       align='right', font_size=11, color='000000', border=None):
     c = ws.cell(row, col, value)
     c.font = Font(name='微軟正黑體', bold=bold, size=font_size, color=color)
     if fill: c.fill = fill
@@ -30,7 +30,7 @@ def generate_excel() -> str:
     ws.page_setup.fitToWidth  = 1
     ws.page_setup.fitToHeight = 1
     ws.page_setup.orientation = 'landscape'
-    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5)
+    ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.3, bottom=0.3)
 
     # Styles
     hdr_fill  = PatternFill('solid', start_color='1F4E79')
@@ -44,16 +44,16 @@ def generate_excel() -> str:
     today_str = date.today().strftime('%Y/%m/%d')
 
     # Column widths
-    col_w = [8, 16, 8,  7,9,11,  7,9,11,  7,9,11,  7,9,11,  11,11,11,11]
+    col_w = [9, 18, 9,  8,10,13,  8,10,13,  8,10,13,  8,10,13,  13,13,13,13]
     for i, w in enumerate(col_w, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     # ── Row 1: Title ──────────────────────────────────────────────────────────
     ws.merge_cells('A1:S1')
     c = ws.cell(1, 1, f'庫存總表（台灣）　　單位：NTD　　日期：{today_str}')
-    c.font = Font(name='微軟正黑體', bold=True, size=12)
+    c.font = Font(name='微軟正黑體', bold=True, size=14)
     c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[1].height = 32
 
     # ── Row 2: Group headers ──────────────────────────────────────────────────
     groups = [(1,1,'股票\n代號'),(2,2,'股票名稱'),(3,3,'市價'),
@@ -61,11 +61,11 @@ def generate_excel() -> str:
     for cs, ce, label in groups:
         if cs < ce: ws.merge_cells(start_row=2,start_column=cs,end_row=2,end_column=ce)
         c = ws.cell(2, cs, label)
-        c.font = Font(name='微軟正黑體', bold=True, size=9, color='FFFFFF')
+        c.font = Font(name='微軟正黑體', bold=True, size=11, color='FFFFFF')
         c.fill = hdr_fill
         c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         c.border = bdr
-    ws.row_dimensions[2].height = 28
+    ws.row_dimensions[2].height = 36
 
     # ── Row 3: Sub-headers ────────────────────────────────────────────────────
     for col in [1,2,3]:
@@ -75,11 +75,11 @@ def generate_excel() -> str:
     sub_vals = ['張數','成本','金額']*4 + ['RC','華強','私RC','私強']
     for col_i, h in zip(sub_cols, sub_vals):
         c = ws.cell(3, col_i, h)
-        c.font = Font(name='微軟正黑體', bold=True, size=9, color='FFFFFF')
+        c.font = Font(name='微軟正黑體', bold=True, size=11, color='FFFFFF')
         c.fill = sub_fill
         c.alignment = Alignment(horizontal='center', vertical='center')
         c.border = bdr
-    ws.row_dimensions[3].height = 18
+    ws.row_dimensions[3].height = 22
 
     # ── Data rows ─────────────────────────────────────────────────────────────
     positions = Position.query.filter(Position.shares > 0).all()
@@ -101,21 +101,22 @@ def generate_excel() -> str:
         fill = alt_fill if row % 2 == 0 else PatternFill('solid', start_color='FFFFFF')
         price = data['price']
 
-        _s(ws, row, 1, code,            align='center', bold=True, fill=fill, border=bdr, font_size=9)
+        _s(ws, row, 1, code,            align='center', bold=True, fill=fill, border=bdr, font_size=11)
         _s(ws, row, 2, data['name'],    align='left',              fill=fill, border=bdr, font_size=9)
-        _s(ws, row, 3, price,           align='right',             fill=fill, border=bdr, font_size=9, num_fmt='#,##0.00')
+        _s(ws, row, 3, price,           align='right',             fill=fill, border=bdr, font_size=11, num_fmt='#,##0.00')
 
         col = 4
         for ent in ENTITIES:
             pos = data['entities'].get(ent)
-            shares = round(pos.shares/1000) if pos else None
+            shares = (pos.shares/1000) if pos else None
+            if shares is not None: shares = float(f'{shares:.3f}'.rstrip('0').rstrip('.'))
             cost   = pos.avg_cost           if pos else None
             total  = round(pos.total_cost)  if pos else None
             pnl    = round(pos.unrealized_pnl()) if (pos and price) else None
 
-            _s(ws, row, col,   shares, fill=fill, border=bdr, font_size=9, num_fmt='#,##0')
-            _s(ws, row, col+1, cost,   fill=fill, border=bdr, font_size=9, num_fmt='#,##0.00')
-            _s(ws, row, col+2, total,  fill=fill, border=bdr, font_size=9, num_fmt='#,##0')
+            _s(ws, row, col,   shares, fill=fill, border=bdr, font_size=11, num_fmt='#,##0')
+            _s(ws, row, col+1, cost,   fill=fill, border=bdr, font_size=11, num_fmt='#,##0.00')
+            _s(ws, row, col+2, total,  fill=fill, border=bdr, font_size=11, num_fmt='#,##0')
             if total: totals[ent] += total
             col += 3
 
@@ -123,14 +124,14 @@ def generate_excel() -> str:
             pos = data['entities'].get(ent)
             pnl = round(pos.unrealized_pnl()) if (pos and price) else None
             c = ws.cell(row, 16+i, pnl)
-            c.font = Font(name='微軟正黑體', size=9,
+            c.font = Font(name='微軟正黑體', size=11,
                          color=('1D9E75' if (pnl or 0) >= 0 else 'C00000'))
             c.fill = fill; c.border = bdr
             c.alignment = Alignment(horizontal='right', vertical='center')
             c.number_format = '+#,##0;-#,##0;-'
             if pnl: tot_pnl[ent] += pnl
 
-        ws.row_dimensions[row].height = 16
+        ws.row_dimensions[row].height = 20
         row += 1
 
     # ── Totals row ────────────────────────────────────────────────────────────
@@ -140,11 +141,11 @@ def generate_excel() -> str:
     for ent in ENTITIES:
         _s(ws, row, col,   None,          fill=tot_fill, border=bdr, font_size=9)
         _s(ws, row, col+1, None,          fill=tot_fill, border=bdr, font_size=9)
-        _s(ws, row, col+2, totals[ent],   fill=tot_fill, border=bdr, font_size=9, bold=True, num_fmt='#,##0')
+        _s(ws, row, col+2, totals[ent],   fill=tot_fill, border=bdr, font_size=11, bold=True, num_fmt='#,##0')
         col += 3
     for i, ent in enumerate(ENTITIES):
         c = ws.cell(row, 16+i, tot_pnl[ent] or None)
-        c.font = Font(name='微軟正黑體', bold=True, size=9,
+        c.font = Font(name='微軟正黑體', bold=True, size=11,
                      color=('1D9E75' if (tot_pnl[ent] or 0) >= 0 else 'C00000'))
         c.fill = tot_fill; c.border = bdr
         c.alignment = Alignment(horizontal='right', vertical='center')
@@ -169,7 +170,7 @@ def generate_excel() -> str:
     # Sub-headers for P&L table
     for i, lbl in enumerate(['RC','華強','RC','華強','RC','華強'], 3):
         c2 = ws.cell(row, i, lbl)
-        c2.font = Font(name='微軟正黑體', bold=True, size=9, color='FFFFFF')
+        c2.font = Font(name='微軟正黑體', bold=True, size=11, color='FFFFFF')
         c2.fill = sub_fill
         c2.alignment = Alignment(horizontal='center', vertical='center')
         c2.border = bdr
@@ -194,12 +195,12 @@ def generate_excel() -> str:
         _s(ws, row, 1, label, bold=bold, align='left', fill=fill, border=bdr)
         for col_i, val in enumerate([rc, hq, prc, phq, rc+prc, hq+phq], 3):
             c = ws.cell(row, col_i, round(val))
-            c.font = Font(name='微軟正黑體', bold=bold, size=9,
+            c.font = Font(name='微軟正黑體', bold=bold, size=11,
                          color=('1D9E75' if val >= 0 else 'C00000'))
             c.fill = fill; c.border = bdr
             c.alignment = Alignment(horizontal='right', vertical='center')
             c.number_format = '+#,##0;-#,##0;-'
-        ws.row_dimensions[row].height = 16
+        ws.row_dimensions[row].height = 20
         row += 1
 
     row += 1
@@ -211,14 +212,14 @@ def generate_excel() -> str:
     ]
     for section_name, items in placeholders:
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
-        _s(ws, row, 1, section_name, bold=True, align='center', fill=grey_fill, border=bdr, font_size=9)
-        ws.row_dimensions[row].height = 14
+        _s(ws, row, 1, section_name, bold=True, align='center', fill=grey_fill, border=bdr, font_size=11)
+        ws.row_dimensions[row].height = 18
         row += 1
         for item in items:
             _s(ws, row, 1, item, align='left', fill=PatternFill('solid', start_color='FFFFFF'), border=bdr, font_size=9)
             _s(ws, row, 2, '(待補)', align='center', fill=PatternFill('solid', start_color='FFFFFF'), border=bdr,
                font_size=8, color='AAAAAA')
-            ws.row_dimensions[row].height = 14
+            ws.row_dimensions[row].height = 18
             row += 1
         row += 1
 
