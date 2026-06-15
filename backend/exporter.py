@@ -28,8 +28,9 @@ def generate_excel() -> str:
     # Page setup — fit to 1 page wide, 1 page tall
     ws.page_setup.fitToPage   = True
     ws.page_setup.fitToWidth  = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 0
     ws.page_setup.orientation = 'landscape'
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.3, bottom=0.3)
 
     # Styles
@@ -44,7 +45,7 @@ def generate_excel() -> str:
     today_str = date.today().strftime('%Y/%m/%d')
 
     # Column widths
-    col_w = [9, 18, 9,  8,10,13,  8,10,13,  8,10,13,  8,10,13,  13,13,13,13]
+    col_w = [11, 22, 11,  10,13,17,  10,13,17,  10,13,17,  10,13,17,  16,16,16,16]
     for i, w in enumerate(col_w, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
