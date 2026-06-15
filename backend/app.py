@@ -776,6 +776,13 @@ def create_app():
 
         affected = set(e.account_id for e in to_delete)
 
+        # If this cash entry is linked to a transaction, delete the transaction too
+        txn_to_delete = None
+        for e in to_delete:
+            if e.transaction_id:
+                txn_to_delete = Transaction.query.get(e.transaction_id)
+                break
+
         try:
             snapshots = [e.to_dict() for e in to_delete]
             # Break circular FK links first so DELETE doesn't fail
@@ -785,6 +792,16 @@ def create_app():
             for e in to_delete:
                 db.session.delete(e)
             db.session.flush()
+            # Delete linked transaction (recalculate_positions handles the rest)
+            if txn_to_delete:
+                txn_snap = txn_to_delete.to_dict()
+                db.session.delete(txn_to_delete)
+                db.session.flush()
+                from .logic import recalculate_positions
+                recalculate_positions(txn_snap.get('entity'))
+                _audit('delete', 'transactions', txn_snap['id'],
+                       f'資金細項刪除觸發：刪除交易 {txn_snap.get("security_code")} {txn_snap.get("trade_date")}',
+                       txn_snap)
             for acct_id in affected:
                 _recalculate_cash_balance(acct_id)
             for s in snapshots:
@@ -792,7 +809,7 @@ def create_app():
                        f'刪除資金記錄 {s.get("entry_type","?")} {s.get("entry_date","?")} {s.get("description","?")} 金額{s.get("amount","?")}',
                        s)
             db.session.commit()
-            return jsonify({'status': 'ok'})
+            return jsonify({'status': 'ok', 'transaction_deleted': txn_to_delete is not None})
         except Exception as e:
             db.session.rollback()
             return jsonify({'error': str(e)}), 500

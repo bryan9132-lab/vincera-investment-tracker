@@ -679,7 +679,7 @@ function renderHoldings(data, realized, byBroker) {
           </div>
         </div>
         <div class="stock-row-right">
-          <div class="stock-shares">${Math.round(p.shares/1000)} 張</div>
+          <div class="stock-shares">${+(p.shares/1000).toFixed(3).replace(/\.?0+$/, '')} 張</div>
           <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
           <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
           <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
