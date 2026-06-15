@@ -150,6 +150,12 @@ def generate_excel() -> str:
             c.border       = _thin_border()
             if pnl: tot_pnl[ent] += pnl
 
+        # Draw borders on ALL cells in the row (including empty ones) for clean grid
+        for col_i in range(1, 20):
+            c = ws.cell(row, col_i)
+            if c.border.left.style is None:
+                c.border = _thin_border()
+
         ws.row_dimensions[row].height = ROW_HEIGHTS[idx % len(ROW_HEIGHTS)]
         row += 1
 
@@ -171,6 +177,11 @@ def generate_excel() -> str:
         c.alignment    = Alignment(horizontal='right', vertical='center')
         c.number_format = '#,##0'
         c.border       = _thin_border()
+    # Borders on all totals row cells
+    for col_i in range(1, 20):
+        c = ws.cell(row, col_i)
+        if c.border.left.style is None:
+            c.border = _thin_border()
     ws.row_dimensions[row].height = 51
     row += 2
 
@@ -233,13 +244,30 @@ def generate_excel() -> str:
     row += 1
 
     # Pull balances from CashAccount — sum by entity
-    entity_balance = {'RC': 0, '華強': 0, '私銀RC': 0, '私銀華強': 0}
+    # Cash accounts: all are under entity RC or 華強
+    # RC non-private accounts: rc_dunnan, rc_tuni, rc_yuanta, rc_fund, rc_other
+    # RC private: rc_private
+    # 華強 non-private: hq_tuni, hq_yuanta, hq_dunnan, hq_fund, hq_huanan, hq_fubon, hq_yuanta_bank
+    # 華強 private: hq_private
+    RC_PRIVATE    = {'rc_private'}
+    HQ_PRIVATE    = {'hq_private'}
+    RC_NON_PRIV   = {'rc_dunnan','rc_tuni','rc_yuanta','rc_fund','rc_other'}
+    HQ_NON_PRIV   = {'hq_tuni','hq_yuanta','hq_dunnan','hq_fund','hq_huanan','hq_fubon','hq_yuanta_bank'}
+
+    entity_balance = {'RC': 0, '華強': 0, '私RC': 0, '私強': 0}
     accounts = CashAccount.query.all()
     for acct in accounts:
-        if acct.entity in entity_balance:
-            entity_balance[acct.entity] += (acct.balance or 0)
+        bal = acct.balance or 0
+        if acct.id in RC_NON_PRIV:
+            entity_balance['RC'] += bal
+        elif acct.id in RC_PRIVATE:
+            entity_balance['私RC'] += bal
+        elif acct.id in HQ_NON_PRIV:
+            entity_balance['華強'] += bal
+        elif acct.id in HQ_PRIVATE:
+            entity_balance['私強'] += bal
 
-    display_labels = [('RC','RC'), ('華強','華強'), ('私銀RC','私RC'), ('私銀華強','私華強')]
+    display_labels = [('RC','RC'), ('華強','華強'), ('私RC','私RC'), ('私強','私華強')]
     for ent_key, ent_label in display_labels:
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
         _cell(ws, row, 1, ent_label, font_size=16, bold=True, align='left', border=True)
@@ -253,7 +281,7 @@ def generate_excel() -> str:
         ws.row_dimensions[row].height = 54
         row += 1
 
-    ws.freeze_panes = 'D4'
+    # No freeze panes
 
     tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False,
         prefix=f'庫存總表_{date.today().strftime("%Y%m%d")}_')
