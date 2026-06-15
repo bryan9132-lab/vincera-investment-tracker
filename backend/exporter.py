@@ -25,13 +25,16 @@ def generate_excel() -> str:
     ws = wb.active
     ws.title = '庫存總表(台灣)'
 
-    # Page setup — fit to 1 page wide, 1 page tall
+    # Page setup — A4 landscape, fit to 1 page wide × 1 page tall
+    ws.page_setup.paperSize   = ws.PAPERSIZE_A4  # A4, not Letter
     ws.page_setup.fitToPage   = True
     ws.page_setup.fitToWidth  = 1
-    ws.page_setup.fitToHeight = 0
+    ws.page_setup.fitToHeight = 1
     ws.page_setup.orientation = 'landscape'
     ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.3, bottom=0.3)
+    # Match 大合併 margins: L/R=0.8", T/B=0.9", header/footer=0.3"
+    ws.page_margins = PageMargins(left=0.8, right=0.8, top=0.9, bottom=0.9,
+                                  header=0.3, footer=0.3)
 
     # Styles
     hdr_fill  = PatternFill('solid', start_color='1F4E79')
