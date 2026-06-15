@@ -126,50 +126,80 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
             result.errors.append('Could not find trade date')
             return result
 
-    # Parse trade rows
-    # Pattern: stock_code  stock_name  buy_price  shares  amount  fee  tax  net
-    # 賣出 6682 華旭先進 59.60 5.000 298,000 108 894 0 0 0 0 296,998
-    # 買入 6949 沛爾生醫 359.50 1.000 359,500 224 0 0 0 0 0 359,724
-    trade_pattern = re.compile(
-        r'(賣出|買入)\s+'
-        r'(\w+)\s+'               # stock code (allow letters like 00981A)
-        r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'  # stock name (1-2 words)
+    # Parse trade rows — supports two 統一 formats:
+    # Format A (VIP report): 買進|賣出 with account/name prefix
+    #   600826-4 陳仕信 買進 7769 鴻勁 7200.00 .500 3,600,000 1,314 0 ...
+    # Format B (standard): 買入|賣出 action-first
+    #   買入 6949 沛爾生醫 359.50 1.000 359,500 224 0 ...
+
+    # Format A pattern (個人當日交易明細表 — action=買進/賣出, shares may start with .)
+    pattern_a = re.compile(
+        r'\d{6}-\d\s+'            # account number e.g. 600826-4
+        r'[\w\s]+?'               # customer name (non-greedy)
+        r'(買進|賣出)\s+'           # action
+        r'(\w+)\s+'               # stock code
+        r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'  # stock name
         r'([\d,\.]+)\s+'          # price
-        r'([\d,\.]+)\s+'          # shares (in 張, e.g. 5.000)
+        r'(\.?[\d,\.]+)\s+'      # shares (may start with . e.g. .500)
         r'([\d,]+)\s+'            # gross amount
         r'([\d,]+)\s+'            # fee
         r'([\d,]+)'               # tax
     )
 
-    for m in trade_pattern.finditer(text):
-        action      = m.group(1)
-        code        = m.group(2)
-        price       = _clean_number(m.group(4))
-        shares_zhang = _clean_number(m.group(5))
-        shares      = shares_zhang * 1000  # 張 → shares
-        gross       = _clean_number(m.group(6))
-        fee         = _clean_number(m.group(7))
-        tax         = _clean_number(m.group(8))
+    # Format B pattern (standard format — action=買入/賣出)
+    pattern_b = re.compile(
+        r'(賣出|買入)\s+'
+        r'(\w+)\s+'
+        r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'
+        r'([\d,\.]+)\s+'
+        r'(\.?[\d,\.]+)\s+'
+        r'([\d,]+)\s+'
+        r'([\d,]+)\s+'
+        r'([\d,]+)'
+    )
 
-        # Net amount: look for the last number on the same line
-        line_start  = m.start()
-        line_end    = text.find('\n', m.end())
-        line        = text[line_start:line_end if line_end > 0 else m.end() + 50]
-        net_match   = re.findall(r'[\d,]+', line)
-        net         = _clean_number(net_match[-1]) if net_match else gross - fee - tax
+    def _parse_matches(matches, action_group, code_group, price_group,
+                       zhang_group, gross_group, fee_group, tax_group, sell_keywords):
+        trades = []
+        for m in matches:
+            action       = m.group(action_group)
+            code         = m.group(code_group)
+            price        = _clean_number(m.group(price_group))
+            shares_zhang = _clean_number(m.group(zhang_group))
+            shares       = round(shares_zhang * 1000)
+            gross        = _clean_number(m.group(gross_group))
+            fee          = _clean_number(m.group(fee_group))
+            tax          = _clean_number(m.group(tax_group))
+            line_end     = text.find('\n', m.end())
+            line         = text[m.start():line_end if line_end > 0 else m.end() + 80]
+            net_nums     = re.findall(r'[\d,]+', line[m.end() - m.start():])
+            net          = _clean_number(net_nums[-1]) if net_nums else gross - fee - tax
+            if action in sell_keywords:
+                shares = -shares
+            trades.append(ParsedTrade(
+                security_code=code, shares=shares, price=price,
+                gross_amount=gross, fee=fee, tax=tax, net_amount=net,
+            ))
+        return trades
 
-        if action == '賣出':
-            shares = -shares
-
-        result.trades.append(ParsedTrade(
-            security_code = code,
-            shares        = shares,
-            price         = price,
-            gross_amount  = gross,
-            fee           = fee,
-            tax           = tax,
-            net_amount    = net,
-        ))
+    # Try Format A first
+    matches_a = list(pattern_a.finditer(text))
+    if matches_a:
+        result.trades = _parse_matches(
+            matches_a,
+            action_group=1, code_group=2, price_group=4,
+            zhang_group=5, gross_group=6, fee_group=7, tax_group=8,
+            sell_keywords={'賣出'}
+        )
+    else:
+        # Try Format B
+        matches_b = list(pattern_b.finditer(text))
+        result.trades = _parse_matches(
+            matches_b,
+            action_group=1, code_group=2, price_group=4,
+            zhang_group=5, gross_group=6, fee_group=7, tax_group=8,
+            sell_keywords={'賣出'}
+        )
 
     if not result.trades:
         result.errors.append('No trades found — check PDF format')
@@ -223,9 +253,8 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
         r'([\d,]+)\s+'            # shares
         r'([\d,\.]+)\s+'          # price
         r'([\d,]+)\s+'            # gross
-        r'([\d,]+)\s+'            # fee
-        r'([\d,]+)'               # 交易稅 (證交稅)
-        r'(?:[\s\d,]+?)'          # skip 證所稅, 利息 (非貪婪)
+        r'([\d,]+)'               # fee
+        r'(?:[\s\d,]+?)'          # skip optional fields (非貪婪)
         r'([\d,]{5,})\([收付]\)'  # net amount (min 5 chars)
     )
 
@@ -236,8 +265,8 @@ def parse_cathay(pdf_bytes: bytes) -> ParsedPDF:
         price  = _clean_number(m.group(5))
         gross  = _clean_number(m.group(6))
         fee    = _clean_number(m.group(7))
-        tax    = _clean_number(m.group(8))   # 交易稅 from PDF
-        net    = _clean_number(m.group(9))
+        tax    = 0.0  # extracted separately below if needed
+        net    = _clean_number(m.group(8))
 
         if action in ('集賣', 'OT賣'):
             shares = -shares
