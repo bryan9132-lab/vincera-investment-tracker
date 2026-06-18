@@ -5,6 +5,8 @@ Business logic:
 """
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import date, datetime, timedelta
 from .models import db, Transaction, Position, Security, ACCOUNT_MAP
 
@@ -75,7 +77,11 @@ def _fetch_yahoo_avg_price(code: str) -> dict:
 
     try:
         url = 'https://mis.tpex.org.tw/Quote.asmx/GETQ20'
-        resp = requests.post(url, data={'SymbolID': code_clean}, headers=headers, timeout=10)
+        # mis.tpex.org.tw's cert fails strict verification (missing Subject Key
+        # Identifier) even though browsers accept it — disable verification
+        # for this specific public, non-sensitive read-only endpoint.
+        resp = requests.post(url, data={'SymbolID': code_clean}, headers=headers,
+                             timeout=10, verify=False)
         print(f'[均價] GETQ20 {code_clean} status={resp.status_code} body_len={len(resp.text)}', flush=True)
         if resp.status_code == 200:
             xml = resp.text
