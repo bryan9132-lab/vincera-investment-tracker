@@ -76,17 +76,22 @@ def _fetch_yahoo_avg_price(code: str) -> dict:
     try:
         url = 'https://mis.tpex.org.tw/Quote.asmx/GETQ20'
         resp = requests.post(url, data={'SymbolID': code_clean}, headers=headers, timeout=10)
+        print(f'[均價] GETQ20 {code_clean} status={resp.status_code} body_len={len(resp.text)}', flush=True)
         if resp.status_code == 200:
             xml = resp.text
             avg_match  = _re.search(r'<TradeStatisticAverage>([\d\.]+)</TradeStatisticAverage>', xml)
             name_match = _re.search(r'<SymbolName>([^<]+)</SymbolName>', xml)
+            print(f'[均價] avg_match={avg_match.group(1) if avg_match else None}', flush=True)
             if avg_match:
                 avg_price = float(avg_match.group(1))
                 name = name_match.group(1) if name_match else ''
                 if avg_price > 0:
+                    print(f'[均價] SUCCESS {code_clean} = {avg_price}', flush=True)
                     return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
-    except Exception:
-        pass
+        else:
+            print(f'[均價] non-200 response body: {resp.text[:200]}', flush=True)
+    except Exception as ex:
+        print(f'[均價] EXCEPTION for {code_clean}: {type(ex).__name__}: {ex}', flush=True)
 
     # Fallback: Yahoo intraday VWAP if TPEX/mis endpoint fails
     for suffix in ['.TWO', '.TW']:
