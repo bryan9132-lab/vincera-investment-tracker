@@ -5,7 +5,7 @@ Business logic:
 """
 
 import requests
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from .models import db, Transaction, Position, Security, ACCOUNT_MAP
 
 
@@ -57,18 +57,48 @@ def recalculate_positions(entity: str = None):
 
 def _fetch_yahoo_avg_price(code: str) -> dict:
     """
-    Fetch 興櫃 weighted average price (均價/VWAP) for a stock.
-    Strategy:
-      1. Yahoo v8 intraday (1m interval, 1d range) → calculate VWAP from closes+volumes
-      2. TPEX API fallback
-      3. Yahoo v8 daily fallback (returns 成交價 if all else fails)
+    Fetch 興櫃 official weighted average price (均價) directly from TPEX
+    (證券櫃買中心) — the authoritative source for 興櫃 均價.
+    This matches what Sophie sees on Yahoo Finance and 證券櫃買中心 website,
+    since both ultimately source from TPEX.
     """
     code_clean = code.strip().upper()
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
+    # TPEX 興櫃股票行情 daily quotes API (official 均價 source)
+    # Try several known endpoints/date formats for resilience
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+               'Referer': 'https://www.tpex.org.tw/'}
+
+    attempts = []
+    for days_back in range(0, 4):  # today, then up to 3 days back (weekends/holidays)
+        d = date.today() - timedelta(days=days_back)
+        roc_date = f'{d.year-1911}/{d.month:02d}/{d.day:02d}'
+        attempts.append(roc_date)
+
+    for roc_date in attempts:
+        try:
+            url = 'https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php'
+            params = {'l': 'zh-tw', 'o': 'json', 'd': roc_date, 'se': 'EW'}
+            resp = requests.get(url, params=params, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            rows = data.get('aaData', [])
+            if not rows:
+                continue
+            for row in rows:
+                if str(row[0]).strip() == code_clean:
+                    # Column order: code, name, 均價, 成交量(股), ...
+                    avg_price = float(str(row[2]).replace(',', ''))
+                    name      = str(row[1]).strip()
+                    if avg_price > 0:
+                        return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
+        except Exception:
+            continue
+
+    # Fallback: Yahoo intraday VWAP if TPEX completely unreachable
     for suffix in ['.TWO', '.TW']:
         try:
-            # Fetch 1-minute intraday data for today → compute VWAP
             url  = f'https://query1.finance.yahoo.com/v8/finance/chart/{code_clean}{suffix}'
             resp = requests.get(url, params={'interval': '1m', 'range': '1d'},
                                 headers=headers, timeout=10)
@@ -82,38 +112,16 @@ def _fetch_yahoo_avg_price(code: str) -> dict:
             indicators = result[0].get('indicators', {})
             closes    = indicators.get('quote', [{}])[0].get('close', [])
             volumes   = indicators.get('quote', [{}])[0].get('volume', [])
-
-            # VWAP = sum(price * volume) / sum(volume)
-            total_val = sum(c * v for c, v in zip(closes, volumes)
-                           if c is not None and v is not None and v > 0)
-            total_vol = sum(v for c, v in zip(closes, volumes)
-                           if c is not None and v is not None and v > 0)
+            total_val = sum(c * v for c, v in zip(closes, volumes) if c and v)
+            total_vol = sum(v for c, v in zip(closes, volumes) if c and v)
             if total_val > 0 and total_vol > 0:
                 vwap = round(total_val / total_vol, 2)
                 return {'code': code, 'name': name_val, 'price': vwap, 'date': date.today()}
-
-            # If intraday data empty (market closed), fall back to regularMarketPrice
             price = meta.get('regularMarketPrice') or meta.get('previousClose')
             if price:
                 return {'code': code, 'name': name_val, 'price': float(price), 'date': date.today()}
         except Exception:
             continue
-
-    # TPEX fallback
-    try:
-        from datetime import datetime
-        today_str = datetime.now().strftime('%Y/%m/%d')
-        url = 'https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php'
-        params = {'l': 'zh-tw', 'o': 'json', 'd': today_str, 'se': 'EW'}
-        tpex_h = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.tpex.org.tw/'}
-        resp = requests.get(url, params=params, headers=tpex_h, timeout=8)
-        if resp.status_code == 200:
-            for row in resp.json().get('aaData', []):
-                if str(row[0]).strip() == code_clean:
-                    return {'code': code, 'name': str(row[1]).strip(),
-                            'price': float(str(row[2]).replace(',', '')), 'date': date.today()}
-    except Exception:
-        pass
 
     return {'code': code, 'name': '', 'price': None, 'date': None}
 

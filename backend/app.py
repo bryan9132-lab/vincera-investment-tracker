@@ -640,6 +640,71 @@ def create_app():
         entries = q.limit(limit).all()
         return jsonify([e.to_dict() for e in entries])
 
+
+    # ── Export 資金細項 as Excel ─────────────────────────────────────────────
+    @app.route('/api/cash/entries/export', methods=['GET'])
+    def export_cash_entries():
+        """Export 資金細項 ledger as Excel, filterable by account_id/entity/month."""
+        account_id = request.args.get('account_id')
+        entity     = request.args.get('entity')
+        month      = request.args.get('month')  # 'YYYY-MM'
+
+        q = CashEntry.query.order_by(CashEntry.entry_date.desc(), CashEntry.id.desc())
+        if account_id:
+            q = q.filter_by(account_id=account_id)
+        elif entity:
+            acct_ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
+            q = q.filter(CashEntry.account_id.in_(acct_ids))
+        if month:
+            start = date.fromisoformat(f'{month}-01')
+            if start.month == 12:
+                end = date(start.year + 1, 1, 1)
+            else:
+                end = date(start.year, start.month + 1, 1)
+            q = q.filter(CashEntry.entry_date >= start, CashEntry.entry_date < end)
+
+        entries = q.all()
+        acct_map = {a.id: a.name for a in CashAccount.query.all()}
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        import tempfile
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '資金細項'
+        headers = ['日期', '帳戶', '類型', '說明', '對方帳戶', '金額', '餘額']
+        bold = Font(bold=True, color='FFFFFF')
+        fill = PatternFill('solid', start_color='1F4E79')
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(1, i, h)
+            c.font = bold; c.fill = fill
+            c.alignment = Alignment(horizontal='center')
+
+        for r, e in enumerate(entries, 2):
+            counterpart = '—'
+            if e.linked_entry_id:
+                mirror = CashEntry.query.get(e.linked_entry_id)
+                if mirror:
+                    counterpart = acct_map.get(mirror.account_id, mirror.account_id)
+            desc = e.description or ''
+            import re as _re
+            desc = _re.sub(r'^\[[^\]]+→[^\]]+\]\s*', '', desc) or '—'
+            ws.cell(r, 1, e.entry_date)
+            ws.cell(r, 2, acct_map.get(e.account_id, e.account_id))
+            ws.cell(r, 3, e.entry_type)
+            ws.cell(r, 4, desc)
+            ws.cell(r, 5, counterpart)
+            ws.cell(r, 6, e.amount)
+            ws.cell(r, 7, e.balance_after)
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+        wb.save(tmp.name)
+        label = account_id or entity or '全部'
+        month_label = month or '全部月份'
+        return send_file(tmp.name, as_attachment=True,
+            download_name=f'資金細項_{label}_{month_label}_{date.today().strftime("%Y%m%d")}.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
     # ── Manual cash entry ────────────────────────────────────────────────────
     @app.route('/api/cash/entry', methods=['POST'])
     def add_cash_entry():
@@ -703,6 +768,17 @@ def create_app():
         try:
             if entry_type in ('轉出賬戶', '股東往來（借）', '股東往來（還）'):
                 target  = CashAccount.query.get(data['target_account_id'])
+
+                # 股東往來 must be cross-entity (RC↔華強 only); same-entity → use 轉出賬戶
+                if entry_type in ('股東往來（借）', '股東往來（還）'):
+                    if not target:
+                        return jsonify({'error': '找不到目標帳戶'}), 400
+                    if acct.entity == target.entity:
+                        return jsonify({
+                            'error': f'股東往來僅限不同 entity 之間（RC↔華強）。'
+                                     f'{acct.entity} 帳戶之間的轉帳請使用「轉出賬戶」功能。'
+                        }), 400
+
                 out_amt = -abs(amount)
                 in_amt  =  abs(amount)
 

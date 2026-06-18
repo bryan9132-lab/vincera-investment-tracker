@@ -387,7 +387,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <tbody>
           <tr><td class="left">私銀貸款</td><td id="lm-rc-loan">—</td><td id="lm-hq-loan">—</td></tr>
           <tr><td class="left">股東往來</td><td id="lm-rc-borrow">—</td><td id="lm-hq-borrow">—</td></tr>
-          <tr style="font-weight:700"><td class="left">私銀自有資金</td><td id="lm-rc-net">—</td><td id="lm-hq-net">—</td></tr>
+          <tr style="font-weight:700"><td class="left">調度至私銀資金</td><td id="lm-rc-net">—</td><td id="lm-hq-net">—</td></tr>
         </tbody>
       </table>
     </div>
@@ -410,6 +410,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <select id="ledger-month" class="filter-select" onchange="applyLedgerFilter()">
           <option value="">全部月份</option>
         </select>
+        <button class="btn btn-success btn-sm" onclick="exportCashLedger()">⬇ 匯出記錄</button>
       </div>
       <button class="btn btn-primary" onclick="openCashEntryModal()">＋ 新增記錄</button>
     </div>
@@ -1089,6 +1090,17 @@ async function exportHistory(){
   if(entity) url+=`&entity=${encodeURIComponent(entity)}`;
   if(broker) url+=`&broker=${encodeURIComponent(broker)}`;
   window.location=url; toast('📥 下載中...','info');
+}
+
+async function exportCashLedger(){
+  const acctId = document.getElementById('ledger-account').value;
+  const month  = document.getElementById('ledger-month').value;
+  let url = `${API}/api/cash/entries/export`;
+  const params = [];
+  if(acctId) params.push(`account_id=${encodeURIComponent(acctId)}`);
+  if(month)  params.push(`month=${encodeURIComponent(month)}`);
+  if(params.length) url += '?' + params.join('&');
+  window.location = url; toast('📥 下載中...','info');
 }
 
 // ── Upload mode switching ─────────────────────────────────────────────────────
