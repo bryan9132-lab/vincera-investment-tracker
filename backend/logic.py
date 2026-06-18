@@ -57,46 +57,38 @@ def recalculate_positions(entity: str = None):
 
 def _fetch_yahoo_avg_price(code: str) -> dict:
     """
-    Fetch 興櫃 official weighted average price (均價) directly from TPEX
-    (證券櫃買中心) — the authoritative source for 興櫃 均價.
-    This matches what Sophie sees on Yahoo Finance and 證券櫃買中心 website,
-    since both ultimately source from TPEX.
+    Fetch 興櫃 official weighted average price (均價) directly from TPEX's
+    market-info service (mis.tpex.org.tw) — the same source Yahoo Finance
+    and 證券櫃買中心 website both use for 興櫃 均價.
+
+    Endpoint: POST https://mis.tpex.org.tw/Quote.asmx/GETQ20
+    Body: SymbolID=<code>
+    Response: XML with <TradeStatisticAverage> = official 均價
     """
+    import re as _re
     code_clean = code.strip().upper()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://mis.tpex.org.tw/ib120stk.aspx',
+    }
 
-    # TPEX 興櫃股票行情 daily quotes API (official 均價 source)
-    # Try several known endpoints/date formats for resilience
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-               'Referer': 'https://www.tpex.org.tw/'}
+    try:
+        url = 'https://mis.tpex.org.tw/Quote.asmx/GETQ20'
+        resp = requests.post(url, data={'SymbolID': code_clean}, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            xml = resp.text
+            avg_match  = _re.search(r'<TradeStatisticAverage>([\d\.]+)</TradeStatisticAverage>', xml)
+            name_match = _re.search(r'<SymbolName>([^<]+)</SymbolName>', xml)
+            if avg_match:
+                avg_price = float(avg_match.group(1))
+                name = name_match.group(1) if name_match else ''
+                if avg_price > 0:
+                    return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
+    except Exception:
+        pass
 
-    attempts = []
-    for days_back in range(0, 4):  # today, then up to 3 days back (weekends/holidays)
-        d = date.today() - timedelta(days=days_back)
-        roc_date = f'{d.year-1911}/{d.month:02d}/{d.day:02d}'
-        attempts.append(roc_date)
-
-    for roc_date in attempts:
-        try:
-            url = 'https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php'
-            params = {'l': 'zh-tw', 'o': 'json', 'd': roc_date, 'se': 'EW'}
-            resp = requests.get(url, params=params, headers=headers, timeout=10)
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            rows = data.get('aaData', [])
-            if not rows:
-                continue
-            for row in rows:
-                if str(row[0]).strip() == code_clean:
-                    # Column order: code, name, 均價, 成交量(股), ...
-                    avg_price = float(str(row[2]).replace(',', ''))
-                    name      = str(row[1]).strip()
-                    if avg_price > 0:
-                        return {'code': code, 'name': name, 'price': avg_price, 'date': date.today()}
-        except Exception:
-            continue
-
-    # Fallback: Yahoo intraday VWAP if TPEX completely unreachable
+    # Fallback: Yahoo intraday VWAP if TPEX/mis endpoint fails
     for suffix in ['.TWO', '.TW']:
         try:
             url  = f'https://query1.finance.yahoo.com/v8/finance/chart/{code_clean}{suffix}'
