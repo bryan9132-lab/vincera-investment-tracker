@@ -38,6 +38,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
 .btn-ghost:hover:not(:disabled){color:var(--text);border-color:var(--muted)}
 .btn-sm{padding:5px 12px;font-size:12px}
+.btn-xs{padding:3px 9px;font-size:11px}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .upload-zone{border:2px dashed var(--border);border-radius:10px;padding:44px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
 .upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:rgba(79,142,247,.05)}
@@ -183,6 +184,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="tab" onclick="switchTab('history')">📋 交易記錄</div>
     <div class="tab" onclick="switchTab('cashsummary')">💰 資金總表</div>
     <div class="tab" onclick="switchTab('cashledger')">📒 資金細項</div>
+    <div class="tab" onclick="switchTab('dividends')">🎁 股利管理</div>
   </div>
 
   <!-- ── Tab: Holdings ── -->
@@ -461,6 +463,53 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       </table>
     </div>
   </div>
+
+  <!-- ── Tab: 股利管理 ── -->
+  <div class="tab-panel" id="tab-dividends">
+    <select id="div-filter-entity" class="filter-select" onchange="loadDividends()" style="margin-bottom:16px">
+      <option value="">全部帳戶</option>
+      <option value="RC">RC</option>
+      <option value="華強">華強</option>
+    </select>
+
+    <!-- 現金股利 -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="ledger-toolbar" style="margin-bottom:0">
+        <div class="card-title" style="margin:0">💵 現金股利</div>
+        <button class="btn btn-primary btn-sm" onclick="openCashDividendModal()">＋ 新增現金股利</button>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table>
+          <thead><tr>
+            <th class="left">日期</th><th class="left">帳戶</th><th class="left">券商</th>
+            <th class="left">代號</th><th class="left">名稱</th><th>股數</th>
+            <th>每股配發</th><th>總額</th><th class="left">所屬期間</th>
+            <th class="left">預計入帳</th><th>狀態</th><th class="left">操作</th>
+          </tr></thead>
+          <tbody id="cash-div-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 股票股利 -->
+    <div class="card">
+      <div class="ledger-toolbar" style="margin-bottom:0">
+        <div class="card-title" style="margin:0">📈 股票股利</div>
+        <button class="btn btn-primary btn-sm" onclick="openStockDividendModal()">＋ 新增股票股利</button>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table>
+          <thead><tr>
+            <th class="left">日期</th><th class="left">帳戶</th><th class="left">券商</th>
+            <th class="left">代號</th><th class="left">名稱</th><th>庫存股數</th>
+            <th>每股配發</th><th>股票股利</th><th class="left">所屬期間</th>
+            <th class="left">預計撥券</th><th>狀態</th><th class="left">操作</th>
+          </tr></thead>
+          <tbody id="stock-div-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Audit Log Modal ── -->
@@ -525,6 +574,138 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeCashEntryModal()">取消</button>
       <button class="btn btn-success" onclick="submitCashEntry()">✅ 確認儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Cash Dividend Modal ── -->
+<div class="modal-overlay" id="cash-div-modal" style="display:none" onclick="if(event.target.id==='cash-div-modal')closeCashDividendModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:520px">
+    <div class="modal-title">新增現金股利</div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>日期（公告日）</label>
+        <input type="date" id="cd-date">
+      </div>
+      <div class="modal-field">
+        <label>歸屬賬戶</label>
+        <select id="cd-entity" class="filter-select" style="width:100%" onchange="onDividendFieldChange('cash')">
+          <option value="RC">RC</option>
+          <option value="華強">華強</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>存放券商</label>
+        <select id="cd-broker" class="filter-select" style="width:100%" onchange="onDividendFieldChange('cash')">
+          <option value="元大">元大</option>
+          <option value="統一">統一</option>
+          <option value="私銀國泰">私銀國泰</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>股票代號</label>
+        <input type="text" id="cd-code" placeholder="e.g. 2330" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" onblur="onDividendFieldChange('cash')">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>股票名稱</label>
+      <input type="text" id="cd-name" placeholder="自動帶入，可手動修改" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>股數（自動帶入，可修改）</label>
+        <input type="number" id="cd-shares" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" oninput="calcCashDividendTotal()">
+      </div>
+      <div class="modal-field">
+        <label>每股配發</label>
+        <input type="number" step="0.01" id="cd-per-share" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" oninput="calcCashDividendTotal()">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>現金股利總額（自動計算）</label>
+      <input type="text" id="cd-total" readonly style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>所屬期間</label>
+        <input type="text" id="cd-period" placeholder="e.g. 2025/Q4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+      </div>
+      <div class="modal-field">
+        <label>預計入帳日期</label>
+        <input type="date" id="cd-deposit-date">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCashDividendModal()">取消</button>
+      <button class="btn btn-success" onclick="submitCashDividend()">✅ 確認儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Stock Dividend Modal ── -->
+<div class="modal-overlay" id="stock-div-modal" style="display:none" onclick="if(event.target.id==='stock-div-modal')closeStockDividendModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:520px">
+    <div class="modal-title">新增股票股利</div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>日期（除權日）</label>
+        <input type="date" id="sd-date">
+      </div>
+      <div class="modal-field">
+        <label>歸屬賬戶</label>
+        <select id="sd-entity" class="filter-select" style="width:100%" onchange="onDividendFieldChange('stock')">
+          <option value="RC">RC</option>
+          <option value="華強">華強</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>存放券商</label>
+        <select id="sd-broker" class="filter-select" style="width:100%" onchange="onDividendFieldChange('stock')">
+          <option value="元大">元大</option>
+          <option value="統一">統一</option>
+          <option value="私銀國泰">私銀國泰</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>股票代號</label>
+        <input type="text" id="sd-code" placeholder="e.g. 6682" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" onblur="onDividendFieldChange('stock')">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>股票名稱</label>
+      <input type="text" id="sd-name" placeholder="自動帶入，可手動修改" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>庫存股數（自動帶入，可修改）</label>
+        <input type="number" id="sd-shares" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" oninput="calcStockDividendTotal()">
+      </div>
+      <div class="modal-field">
+        <label>每股配發（股票股利比率）</label>
+        <input type="number" step="0.01" id="sd-ratio" placeholder="e.g. 0.3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px" oninput="calcStockDividendTotal()">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>股票股利總數（自動計算）</label>
+      <input type="text" id="sd-total" readonly style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>所屬期間</label>
+        <input type="text" id="sd-period" placeholder="e.g. 2025/Q4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+      </div>
+      <div class="modal-field">
+        <label>預計撥券日期</label>
+        <input type="date" id="sd-allocate-date">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeStockDividendModal()">取消</button>
+      <button class="btn btn-success" onclick="submitStockDividend()">✅ 確認儲存</button>
     </div>
   </div>
 </div>
@@ -595,7 +776,7 @@ document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
 function switchTab(name) {
-  const names = ['holdings','upload','history','cashsummary','cashledger'];
+  const names = ['holdings','upload','history','cashsummary','cashledger','dividends'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -603,6 +784,7 @@ function switchTab(name) {
   if(name==='history')     loadHistory();
   if(name==='cashsummary') loadCashSummary();
   if(name==='cashledger')  loadCashLedger();
+  if(name==='dividends')   loadDividends();
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
@@ -1670,6 +1852,244 @@ async function initCashAccountSelector() {
   } catch(e){}
 }
 initCashAccountSelector();
+
+// ══════════════════════════════════════════════════════════════════════════
+// 股利管理 (Dividends)
+// ══════════════════════════════════════════════════════════════════════════
+let allCashDividends = [];
+let allStockDividends = [];
+
+async function loadDividends() {
+  const entity = document.getElementById('div-filter-entity').value;
+  const qs = entity ? `?entity=${entity}` : '';
+  const [cdRes, sdRes] = await Promise.all([
+    fetch(`${API}/api/cash_dividends${qs}`),
+    fetch(`${API}/api/stock_dividends${qs}`),
+  ]);
+  allCashDividends  = await cdRes.json();
+  allStockDividends = await sdRes.json();
+  renderCashDividends();
+  renderStockDividends();
+}
+
+function renderCashDividends() {
+  const tbody = document.getElementById('cash-div-body');
+  if (!allCashDividends.length) {
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:20px">尚無現金股利記錄</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = allCashDividends.map(d => {
+    const statusBadge = d.deposited
+      ? `<span style="color:var(--positive);font-size:12px">✅ 已入帳</span>`
+      : `<span style="color:var(--muted);font-size:12px">待入帳</span>`;
+    const actionBtn = d.deposited
+      ? ''
+      : `<button class="btn btn-success btn-xs" onclick="openDepositModal(${d.id})" style="margin-right:4px">標記已入帳</button>
+         <button class="btn btn-ghost btn-xs" onclick="deleteCashDividend(${d.id})">刪除</button>`;
+    return `<tr>
+      <td class="left">${d.announce_date}</td>
+      <td class="left">${d.entity}</td>
+      <td class="left">${d.broker}</td>
+      <td class="left">${d.security_code}</td>
+      <td class="left">${d.security_name}</td>
+      <td>${fmt(d.shares_held)}</td>
+      <td>${d.dividend_per_share}</td>
+      <td>${fmt(Math.round(d.total_amount))}</td>
+      <td class="left">${d.period_note||'—'}</td>
+      <td class="left">${d.expected_deposit_date||'—'}</td>
+      <td>${statusBadge}</td>
+      <td class="left">${actionBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderStockDividends() {
+  const tbody = document.getElementById('stock-div-body');
+  if (!allStockDividends.length) {
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:20px">尚無股票股利記錄</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = allStockDividends.map(d => {
+    const statusBadge = d.allocated
+      ? `<span style="color:var(--positive);font-size:12px">✅ 已入集保</span>`
+      : `<span style="color:var(--muted);font-size:12px">待入集保 (${fmt(d.bonus_shares)}股暫不可賣)</span>`;
+    const actionBtn = d.allocated
+      ? ''
+      : `<button class="btn btn-success btn-xs" onclick="allocateStockDividend(${d.id})" style="margin-right:4px">標記已入集保</button>
+         <button class="btn btn-ghost btn-xs" onclick="deleteStockDividend(${d.id})">刪除</button>`;
+    return `<tr>
+      <td class="left">${d.announce_date}</td>
+      <td class="left">${d.entity}</td>
+      <td class="left">${d.broker}</td>
+      <td class="left">${d.security_code}</td>
+      <td class="left">${d.security_name}</td>
+      <td>${fmt(d.shares_held)}</td>
+      <td>${d.dividend_ratio}</td>
+      <td>${fmt(Math.round(d.bonus_shares))}</td>
+      <td class="left">${d.period_note||'—'}</td>
+      <td class="left">${d.expected_allocate_date||'—'}</td>
+      <td>${statusBadge}</td>
+      <td class="left">${actionBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Auto-fill helper: stock name + shares held ──────────────────────────────
+async function onDividendFieldChange(kind) {
+  const prefix = kind === 'cash' ? 'cd' : 'sd';
+  const entity = document.getElementById(`${prefix}-entity`).value;
+  const broker = document.getElementById(`${prefix}-broker`).value;
+  const code   = document.getElementById(`${prefix}-code`).value.trim();
+  if (!code) return;
+
+  // Auto-fill stock name from securities list (if known) or leave for manual entry
+  try {
+    const secRes = await fetch(`${API}/api/securities`);
+    const secs = await secRes.json();
+    const match = secs.find(s => s.code === code);
+    if (match) document.getElementById(`${prefix}-name`).value = match.name;
+  } catch(e){}
+
+  // Auto-fill shares held
+  try {
+    const res = await fetch(`${API}/api/cash_dividends/shares_held?entity=${entity}&broker=${broker}&security_code=${code}`);
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById(`${prefix}-shares`).value = data.shares_held;
+      if (kind === 'cash') calcCashDividendTotal(); else calcStockDividendTotal();
+    }
+  } catch(e){}
+}
+
+function calcCashDividendTotal() {
+  const shares = parseFloat(document.getElementById('cd-shares').value) || 0;
+  const per    = parseFloat(document.getElementById('cd-per-share').value) || 0;
+  document.getElementById('cd-total').value = fmt(Math.round(shares * per));
+}
+
+function calcStockDividendTotal() {
+  const shares = parseFloat(document.getElementById('sd-shares').value) || 0;
+  const ratio  = parseFloat(document.getElementById('sd-ratio').value) || 0;
+  document.getElementById('sd-total').value = fmt(Math.round(shares * ratio));
+}
+
+// ── Cash Dividend Modal ──────────────────────────────────────────────────────
+function openCashDividendModal() {
+  document.getElementById('cd-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('cd-entity').value = 'RC';
+  document.getElementById('cd-broker').value = '元大';
+  document.getElementById('cd-code').value = '';
+  document.getElementById('cd-name').value = '';
+  document.getElementById('cd-shares').value = '';
+  document.getElementById('cd-per-share').value = '';
+  document.getElementById('cd-total').value = '';
+  document.getElementById('cd-period').value = '';
+  document.getElementById('cd-deposit-date').value = '';
+  document.getElementById('cash-div-modal').style.display = 'flex';
+}
+function closeCashDividendModal() {
+  document.getElementById('cash-div-modal').style.display = 'none';
+}
+async function submitCashDividend() {
+  const body = {
+    announce_date: document.getElementById('cd-date').value,
+    entity: document.getElementById('cd-entity').value,
+    broker: document.getElementById('cd-broker').value,
+    security_code: document.getElementById('cd-code').value.trim(),
+    shares_held: parseFloat(document.getElementById('cd-shares').value) || 0,
+    dividend_per_share: parseFloat(document.getElementById('cd-per-share').value) || 0,
+    period_note: document.getElementById('cd-period').value,
+    expected_deposit_date: document.getElementById('cd-deposit-date').value || null,
+  };
+  const res = await fetch(`${API}/api/cash_dividends`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    closeCashDividendModal();
+    toast('✅ 現金股利已新增', 'success');
+    loadDividends();
+  } else {
+    const err = await res.json();
+    toast(`❌ ${err.error||'新增失敗'}`, 'error');
+  }
+}
+async function deleteCashDividend(id) {
+  if (!confirm('確定要刪除這筆現金股利記錄嗎？')) return;
+  const res = await fetch(`${API}/api/cash_dividends/${id}`, { method: 'DELETE' });
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+
+// ── Mark as deposited (現金股利 入帳) ─────────────────────────────────────────
+let depositTargetDivId = null;
+async function openDepositModal(divId) {
+  depositTargetDivId = divId;
+  const d = allCashDividends.find(x => x.id === divId);
+  if (!d) return;
+  // Reuse the cash-account selector pattern: ask which account receives the cash
+  const acctId = prompt(`請輸入入帳帳戶 ID（例如 rc_dunnan, hq_tuni）：\n此股利歸屬於 ${d.entity}`);
+  if (!acctId) return;
+  const res = await fetch(`${API}/api/cash_dividends/${divId}/deposit`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ account_id: acctId.trim() })
+  });
+  if (res.ok) { toast('✅ 已標記入帳並寫入資金細項', 'success'); loadDividends(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+
+// ── Stock Dividend Modal ─────────────────────────────────────────────────────
+function openStockDividendModal() {
+  document.getElementById('sd-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('sd-entity').value = 'RC';
+  document.getElementById('sd-broker').value = '元大';
+  document.getElementById('sd-code').value = '';
+  document.getElementById('sd-name').value = '';
+  document.getElementById('sd-shares').value = '';
+  document.getElementById('sd-ratio').value = '';
+  document.getElementById('sd-total').value = '';
+  document.getElementById('sd-period').value = '';
+  document.getElementById('sd-allocate-date').value = '';
+  document.getElementById('stock-div-modal').style.display = 'flex';
+}
+function closeStockDividendModal() {
+  document.getElementById('stock-div-modal').style.display = 'none';
+}
+async function submitStockDividend() {
+  const body = {
+    announce_date: document.getElementById('sd-date').value,
+    entity: document.getElementById('sd-entity').value,
+    broker: document.getElementById('sd-broker').value,
+    security_code: document.getElementById('sd-code').value.trim(),
+    shares_held: parseFloat(document.getElementById('sd-shares').value) || 0,
+    dividend_ratio: parseFloat(document.getElementById('sd-ratio').value) || 0,
+    period_note: document.getElementById('sd-period').value,
+    expected_allocate_date: document.getElementById('sd-allocate-date').value || null,
+  };
+  const res = await fetch(`${API}/api/stock_dividends`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    closeStockDividendModal();
+    toast('✅ 股票股利已新增', 'success');
+    loadDividends();
+  } else {
+    const err = await res.json();
+    toast(`❌ ${err.error||'新增失敗'}`, 'error');
+  }
+}
+async function deleteStockDividend(id) {
+  if (!confirm('確定要刪除這筆股票股利記錄嗎？')) return;
+  const res = await fetch(`${API}/api/stock_dividends/${id}`, { method: 'DELETE' });
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+async function allocateStockDividend(id) {
+  if (!confirm('確定股票股利已入集保？此操作會將股數正式加入庫存，無法復原。')) return;
+  const res = await fetch(`${API}/api/stock_dividends/${id}/allocate`, { method: 'POST' });
+  if (res.ok) { toast('✅ 已入集保，庫存已更新', 'success'); loadDividends(); loadHoldings(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
 </script>
+
 </body>
 </html>
