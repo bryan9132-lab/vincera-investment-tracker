@@ -125,8 +125,8 @@ CASH_ENTRY_TYPES = [
     '贖回基金',    # fund redemption (fund accounts only) → also credits private account
     '貸款',        # bank loan (私銀accounts only)
     '貸款還款',    # loan repayment (私銀accounts only)
-    '股東往來（借）',   # inter-entity loan (RC↔華強 only)
-    '股東往來（還）',   # inter-entity loan repayment (RC↔華強 only)
+    '借款',        # inter-entity loan (RC↔華強 only)
+    '借款還款',    # inter-entity loan repayment (RC↔華強 only)
     '其他收入',    # manual misc credit
     '其他支出',    # manual misc debit
 ]
@@ -137,18 +137,16 @@ CASH_ENTRY_TYPES = [
 # ══════════════════════════════════════════════════════════════════════════════
 
 class Security(db.Model):
-    """Stock/security master — code, name, region, price_type"""
+    """Stock/security master — code, name, region"""
     __tablename__ = 'securities'
 
     code        = db.Column(db.String(20),  primary_key=True)
     name        = db.Column(db.String(100), nullable=False)
     region      = db.Column(db.String(10),  default='T')
-    price_type  = db.Column(db.String(10),  default='成交價')  # '成交價' or '均價' (興櫃)
     created_at  = db.Column(db.DateTime,    default=datetime.utcnow)
 
     def to_dict(self):
-        return {'code': self.code, 'name': self.name, 'region': self.region,
-                'price_type': self.price_type or '成交價'}
+        return {'code': self.code, 'name': self.name, 'region': self.region}
 
 
 class Transaction(db.Model):
@@ -416,4 +414,90 @@ class FundEntry(db.Model):
             'avg_unit_cost':        self.avg_unit_cost,
             'redemption_amount':    self.redemption_amount,
             'profit':               self.profit,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Dividend tracking — 現金股利 & 股票股利
+# ══════════════════════════════════════════════════════════════════════════════
+
+DIVIDEND_BROKERS = ['元大', '統一', '私銀國泰']
+DIVIDEND_ENTITIES = ['RC', '華強']
+
+
+class CashDividend(db.Model):
+    """現金股利 — cash dividend record, manually entered by Sophie."""
+    __tablename__ = 'cash_dividends'
+
+    id                    = db.Column(db.Integer,     primary_key=True)
+    announce_date         = db.Column(db.Date,        nullable=False)   # 日期 (除息日/announcement)
+    entity                = db.Column(db.String(20),  nullable=False)   # RC or 華強
+    broker                = db.Column(db.String(20),  nullable=False)   # 元大/統一/私銀國泰
+    security_code         = db.Column(db.String(20),  db.ForeignKey('securities.code'), nullable=False)
+    shares_held           = db.Column(db.Float,       nullable=False)   # 股數 at time of entry (auto-filled, editable)
+    dividend_per_share    = db.Column(db.Float,       nullable=False)   # 每股配發
+    total_amount          = db.Column(db.Float,       nullable=False)   # 總額 = shares_held * dividend_per_share
+    period_note           = db.Column(db.String(50),  nullable=True)    # 所屬期間 (free text, e.g. '2025/Q4')
+    expected_deposit_date = db.Column(db.Date,        nullable=True)    # 預計入帳日期
+    deposited             = db.Column(db.Boolean,      default=False)   # Sophie manually marks True once cash is moved to 資金細項
+    deposited_at          = db.Column(db.DateTime,     nullable=True)
+    cash_entry_id         = db.Column(db.Integer,      db.ForeignKey('cash_entries.id'), nullable=True)  # linked ledger entry once deposited
+    created_at            = db.Column(db.DateTime,     default=datetime.utcnow)
+
+    security              = db.relationship('Security', backref='cash_dividends')
+
+    def to_dict(self):
+        return {
+            'id':                    self.id,
+            'announce_date':         self.announce_date.isoformat() if self.announce_date else None,
+            'entity':                self.entity,
+            'broker':                self.broker,
+            'security_code':         self.security_code,
+            'security_name':         self.security.name if self.security else self.security_code,
+            'shares_held':           self.shares_held,
+            'dividend_per_share':    self.dividend_per_share,
+            'total_amount':          self.total_amount,
+            'period_note':           self.period_note,
+            'expected_deposit_date': self.expected_deposit_date.isoformat() if self.expected_deposit_date else None,
+            'deposited':             self.deposited,
+            'deposited_at':          self.deposited_at.isoformat() if self.deposited_at else None,
+            'cash_entry_id':         self.cash_entry_id,
+        }
+
+
+class StockDividend(db.Model):
+    """股票股利 — stock dividend record, manually entered by Sophie."""
+    __tablename__ = 'stock_dividends'
+
+    id                     = db.Column(db.Integer,     primary_key=True)
+    announce_date          = db.Column(db.Date,        nullable=False)  # 日期 (除權日)
+    entity                 = db.Column(db.String(20),  nullable=False)
+    broker                 = db.Column(db.String(20),  nullable=False)
+    security_code          = db.Column(db.String(20),  db.ForeignKey('securities.code'), nullable=False)
+    shares_held            = db.Column(db.Float,       nullable=False)  # 庫存股數 at time of entry (auto-filled, editable)
+    dividend_ratio         = db.Column(db.Float,        nullable=False) # 每股配發 (e.g. 0.3 = 0.3 bonus shares per share)
+    bonus_shares           = db.Column(db.Float,        nullable=False) # 股票股利總數 = shares_held * dividend_ratio
+    period_note            = db.Column(db.String(50),   nullable=True)
+    expected_allocate_date = db.Column(db.Date,         nullable=True)  # 預計撥券日期
+    allocated              = db.Column(db.Boolean,       default=False) # Sophie manually confirms shares landed (集保)
+    allocated_at           = db.Column(db.DateTime,      nullable=True)
+    created_at             = db.Column(db.DateTime,      default=datetime.utcnow)
+
+    security               = db.relationship('Security', backref='stock_dividends')
+
+    def to_dict(self):
+        return {
+            'id':                     self.id,
+            'announce_date':          self.announce_date.isoformat() if self.announce_date else None,
+            'entity':                 self.entity,
+            'broker':                 self.broker,
+            'security_code':          self.security_code,
+            'security_name':          self.security.name if self.security else self.security_code,
+            'shares_held':            self.shares_held,
+            'dividend_ratio':         self.dividend_ratio,
+            'bonus_shares':           self.bonus_shares,
+            'period_note':            self.period_note,
+            'expected_allocate_date': self.expected_allocate_date.isoformat() if self.expected_allocate_date else None,
+            'allocated':              self.allocated,
+            'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
         }

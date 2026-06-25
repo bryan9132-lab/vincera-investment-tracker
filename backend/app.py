@@ -14,7 +14,8 @@ import tempfile
 from backend.models import (db, Transaction, Position, Security, UploadLog,
                             ACCOUNT_MAP, CASH_ACCOUNTS, CASH_ACCOUNT_BROKER_MAP,
                             FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
-                            CashAccount, CashEntry, FundEntry, AuditLog)
+                            CashAccount, CashEntry, FundEntry, AuditLog,
+                            CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES)
 from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
@@ -1516,6 +1517,264 @@ def create_app():
         """Return all securities (for price_type management)."""
         secs = Security.query.order_by(Security.code).all()
         return jsonify([s.to_dict() for s in secs])
+
+    # ── Dividend helper: resolve broker → actual Position entity ────────────────
+    def _dividend_position_entity(form_entity, broker):
+        """
+        Sophie picks entity=RC/華強 + broker=元大/統一/私銀國泰 on the dividend form.
+        For 私銀國泰, the actual Position row lives under entity='私銀RC'/'私銀華強'.
+        For 元大/統一, the Position row is under the plain entity (RC/華強).
+        """
+        if broker == '私銀國泰':
+            return '私銀RC' if form_entity == 'RC' else '私銀華強'
+        return form_entity
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 現金股利 (Cash Dividends)
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.route('/api/cash_dividends', methods=['GET'])
+    def get_cash_dividends():
+        entity = request.args.get('entity')
+        q = CashDividend.query
+        if entity:
+            q = q.filter_by(entity=entity)
+        rows = q.order_by(CashDividend.announce_date.desc()).all()
+        return jsonify([r.to_dict() for r in rows])
+
+    @app.route('/api/cash_dividends/shares_held', methods=['GET'])
+    def get_cash_dividend_shares_held():
+        """Auto-calc helper: given entity+broker+security_code, return current shares held."""
+        form_entity = request.args.get('entity')
+        broker      = request.args.get('broker')
+        code        = request.args.get('security_code')
+        if not all([form_entity, broker, code]):
+            return jsonify({'error': '缺少參數'}), 400
+        pos_entity = _dividend_position_entity(form_entity, broker)
+        pos = Position.query.filter_by(entity=pos_entity, security_code=code).first()
+        return jsonify({'shares_held': pos.shares if pos else 0})
+
+    @app.route('/api/cash_dividends', methods=['POST'])
+    def add_cash_dividend():
+        data = request.json
+        try:
+            announce_date = date.fromisoformat(data['announce_date'])
+        except Exception:
+            return jsonify({'error': '日期格式錯誤'}), 400
+
+        entity = data.get('entity')
+        broker = data.get('broker')
+        code   = data.get('security_code')
+        if entity not in DIVIDEND_ENTITIES:
+            return jsonify({'error': f'歸屬賬戶必須是 {DIVIDEND_ENTITIES}'}), 400
+        if broker not in DIVIDEND_BROKERS:
+            return jsonify({'error': f'存放券商必須是 {DIVIDEND_BROKERS}'}), 400
+
+        sec = Security.query.get(code)
+        if not sec:
+            return jsonify({'error': f'找不到股票代號：{code}'}), 404
+
+        shares_held = float(data.get('shares_held', 0))
+        div_per_share = float(data.get('dividend_per_share', 0))
+        total_amount = round(shares_held * div_per_share)
+
+        expected_date = None
+        if data.get('expected_deposit_date'):
+            expected_date = date.fromisoformat(data['expected_deposit_date'])
+
+        cd = CashDividend(
+            announce_date=announce_date, entity=entity, broker=broker,
+            security_code=code, shares_held=shares_held,
+            dividend_per_share=div_per_share, total_amount=total_amount,
+            period_note=data.get('period_note'), expected_deposit_date=expected_date,
+        )
+        db.session.add(cd)
+        db.session.commit()
+        _audit('create', 'cash_dividends', cd.id,
+               f'新增現金股利 {entity} {sec.name} {total_amount}', cd.to_dict())
+        return jsonify(cd.to_dict()), 201
+
+    @app.route('/api/cash_dividends/<int:div_id>', methods=['PUT'])
+    def update_cash_dividend(div_id):
+        cd = CashDividend.query.get(div_id)
+        if not cd:
+            return jsonify({'error': '找不到記錄'}), 404
+        data = request.json
+        if 'shares_held' in data or 'dividend_per_share' in data:
+            cd.shares_held        = float(data.get('shares_held', cd.shares_held))
+            cd.dividend_per_share = float(data.get('dividend_per_share', cd.dividend_per_share))
+            cd.total_amount       = round(cd.shares_held * cd.dividend_per_share)
+        if 'period_note' in data:
+            cd.period_note = data['period_note']
+        if 'expected_deposit_date' in data:
+            cd.expected_deposit_date = (date.fromisoformat(data['expected_deposit_date'])
+                                        if data['expected_deposit_date'] else None)
+        db.session.commit()
+        _audit('edit', 'cash_dividends', cd.id, '編輯現金股利', cd.to_dict())
+        return jsonify(cd.to_dict())
+
+    @app.route('/api/cash_dividends/<int:div_id>/deposit', methods=['POST'])
+    def deposit_cash_dividend(div_id):
+        """
+        Sophie clicks '已入帳' once the cash actually arrives.
+        This creates a CashEntry in the appropriate 資金細項 ledger.
+        """
+        cd = CashDividend.query.get(div_id)
+        if not cd:
+            return jsonify({'error': '找不到記錄'}), 404
+        if cd.deposited:
+            return jsonify({'error': '此筆已標記為入帳'}), 400
+
+        data = request.json or {}
+        account_id = data.get('account_id')
+        if not account_id:
+            return jsonify({'error': '請指定入帳的資金帳戶'}), 400
+        acct = CashAccount.query.get(account_id)
+        if not acct:
+            return jsonify({'error': f'找不到帳戶：{account_id}'}), 404
+
+        sec = Security.query.get(cd.security_code)
+        entry = CashEntry(
+            account_id=account_id, entry_date=date.today(), entry_type='股利收入',
+            description=f'{sec.name if sec else cd.security_code} 現金股利 {cd.period_note or ""}',
+            amount=cd.total_amount,
+        )
+        acct.balance += cd.total_amount
+        entry.balance_after = acct.balance
+        db.session.add(entry)
+        db.session.flush()
+
+        cd.deposited    = True
+        cd.deposited_at = datetime.utcnow()
+        cd.cash_entry_id = entry.id
+        db.session.commit()
+        _audit('edit', 'cash_dividends', cd.id, f'現金股利已入帳 金額{cd.total_amount}', cd.to_dict())
+        return jsonify(cd.to_dict())
+
+    @app.route('/api/cash_dividends/<int:div_id>', methods=['DELETE'])
+    def delete_cash_dividend(div_id):
+        cd = CashDividend.query.get(div_id)
+        if not cd:
+            return jsonify({'error': '找不到記錄'}), 404
+        if cd.deposited:
+            return jsonify({'error': '已入帳記錄無法刪除，請先處理資金細項中的對應記錄'}), 400
+        snap = cd.to_dict()
+        db.session.delete(cd)
+        db.session.commit()
+        _audit('delete', 'cash_dividends', div_id, '刪除現金股利', snap)
+        return jsonify({'status': 'ok'})
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 股票股利 (Stock Dividends)
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.route('/api/stock_dividends', methods=['GET'])
+    def get_stock_dividends():
+        entity = request.args.get('entity')
+        q = StockDividend.query
+        if entity:
+            q = q.filter_by(entity=entity)
+        rows = q.order_by(StockDividend.announce_date.desc()).all()
+        return jsonify([r.to_dict() for r in rows])
+
+    @app.route('/api/stock_dividends', methods=['POST'])
+    def add_stock_dividend():
+        data = request.json
+        try:
+            announce_date = date.fromisoformat(data['announce_date'])
+        except Exception:
+            return jsonify({'error': '日期格式錯誤'}), 400
+
+        entity = data.get('entity')
+        broker = data.get('broker')
+        code   = data.get('security_code')
+        if entity not in DIVIDEND_ENTITIES:
+            return jsonify({'error': f'歸屬賬戶必須是 {DIVIDEND_ENTITIES}'}), 400
+        if broker not in DIVIDEND_BROKERS:
+            return jsonify({'error': f'存放券商必須是 {DIVIDEND_BROKERS}'}), 400
+
+        sec = Security.query.get(code)
+        if not sec:
+            return jsonify({'error': f'找不到股票代號：{code}'}), 404
+
+        shares_held = float(data.get('shares_held', 0))
+        ratio       = float(data.get('dividend_ratio', 0))
+        bonus_shares = round(shares_held * ratio)
+
+        expected_date = None
+        if data.get('expected_allocate_date'):
+            expected_date = date.fromisoformat(data['expected_allocate_date'])
+
+        sd = StockDividend(
+            announce_date=announce_date, entity=entity, broker=broker,
+            security_code=code, shares_held=shares_held,
+            dividend_ratio=ratio, bonus_shares=bonus_shares,
+            period_note=data.get('period_note'), expected_allocate_date=expected_date,
+        )
+        db.session.add(sd)
+        db.session.commit()
+        _audit('create', 'stock_dividends', sd.id,
+               f'新增股票股利 {entity} {sec.name} {bonus_shares}股', sd.to_dict())
+        return jsonify(sd.to_dict()), 201
+
+    @app.route('/api/stock_dividends/<int:div_id>', methods=['PUT'])
+    def update_stock_dividend(div_id):
+        sd = StockDividend.query.get(div_id)
+        if not sd:
+            return jsonify({'error': '找不到記錄'}), 404
+        data = request.json
+        if 'shares_held' in data or 'dividend_ratio' in data:
+            sd.shares_held    = float(data.get('shares_held', sd.shares_held))
+            sd.dividend_ratio = float(data.get('dividend_ratio', sd.dividend_ratio))
+            sd.bonus_shares   = round(sd.shares_held * sd.dividend_ratio)
+        if 'period_note' in data:
+            sd.period_note = data['period_note']
+        if 'expected_allocate_date' in data:
+            sd.expected_allocate_date = (date.fromisoformat(data['expected_allocate_date'])
+                                         if data['expected_allocate_date'] else None)
+        db.session.commit()
+        _audit('edit', 'stock_dividends', sd.id, '編輯股票股利', sd.to_dict())
+        return jsonify(sd.to_dict())
+
+    @app.route('/api/stock_dividends/<int:div_id>/allocate', methods=['POST'])
+    def allocate_stock_dividend(div_id):
+        """
+        Sophie clicks '已入集保' once the bonus shares are confirmed tradeable.
+        This folds the bonus shares into the real Position (shares increase,
+        total_cost stays the same → avg_cost drops automatically).
+        """
+        sd = StockDividend.query.get(div_id)
+        if not sd:
+            return jsonify({'error': '找不到記錄'}), 404
+        if sd.allocated:
+            return jsonify({'error': '此筆已標記為入集保'}), 400
+
+        pos_entity = _dividend_position_entity(sd.entity, sd.broker)
+        pos = Position.query.filter_by(entity=pos_entity, security_code=sd.security_code).first()
+        if not pos:
+            return jsonify({'error': f'找不到對應庫存：{pos_entity} {sd.security_code}'}), 404
+
+        pos.shares = round(pos.shares + sd.bonus_shares, 4)
+        pos.avg_cost = round(pos.total_cost / pos.shares, 4) if pos.shares else 0
+        # total_cost stays unchanged — shares increase, cost basis spreads thinner
+
+        sd.allocated    = True
+        sd.allocated_at = datetime.utcnow()
+        db.session.commit()
+        _audit('edit', 'stock_dividends', sd.id,
+               f'股票股利已入集保 {pos_entity} {sd.security_code} +{sd.bonus_shares}股', sd.to_dict())
+        return jsonify(sd.to_dict())
+
+    @app.route('/api/stock_dividends/<int:div_id>', methods=['DELETE'])
+    def delete_stock_dividend(div_id):
+        sd = StockDividend.query.get(div_id)
+        if not sd:
+            return jsonify({'error': '找不到記錄'}), 404
+        if sd.allocated:
+            return jsonify({'error': '已入集保記錄無法刪除，請先處理對應庫存'}), 400
+        snap = sd.to_dict()
+        db.session.delete(sd)
+        db.session.commit()
+        _audit('delete', 'stock_dividends', div_id, '刪除股票股利', snap)
+        return jsonify({'status': 'ok'})
 
     # ── Audit log ────────────────────────────────────────────────────────────
     @app.route('/api/audit_log', methods=['GET'])
