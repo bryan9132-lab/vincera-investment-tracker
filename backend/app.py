@@ -1576,17 +1576,49 @@ def create_app():
         rows = q.order_by(CashDividend.announce_date.desc()).all()
         return jsonify([r.to_dict() for r in rows])
 
+    def _get_account_shares(account_no, code):
+        """Replay this single account's transaction history for one security
+        and return current shares held — exact broker-level figure (mirrors
+        the logic in /api/positions/by_broker, scoped to one account)."""
+        txns = (Transaction.query
+                .filter_by(account_no=account_no, security_code=code)
+                .filter(Transaction.shares != 0)
+                .order_by(Transaction.trade_date)
+                .all())
+        shares, total_cost = 0.0, 0.0
+        for t in txns:
+            if t.shares > 0:
+                shares     += t.shares
+                total_cost += t.gross_amount + t.fee
+            else:
+                if shares > 0:
+                    sell_qty = abs(t.shares)
+                    avg      = total_cost / shares
+                    shares     -= sell_qty
+                    total_cost -= avg * sell_qty
+                    if shares < 0.001:
+                        shares, total_cost = 0, 0
+        return shares
+
     @app.route('/api/cash_dividends/shares_held', methods=['GET'])
     def get_cash_dividend_shares_held():
-        """Auto-calc helper: given entity+broker+security_code, return current shares held."""
+        """Auto-calc helper: given entity+broker+security_code, return current
+        shares held in that EXACT broker account (not the entity-wide total)."""
         form_entity = request.args.get('entity')
         broker      = request.args.get('broker')
         code        = request.args.get('security_code')
         if not all([form_entity, broker, code]):
             return jsonify({'error': '缺少參數'}), 400
-        pos_entity = _dividend_position_entity(form_entity, broker)
-        pos = Position.query.filter_by(entity=pos_entity, security_code=code).first()
-        return jsonify({'shares_held': pos.shares if pos else 0})
+        pos_entity   = _dividend_position_entity(form_entity, broker)
+        real_broker  = '國泰' if broker == '私銀國泰' else broker
+        account_no = None
+        for acc_no, info in ACCOUNT_MAP.items():
+            if info['entity'] == pos_entity and info['broker'] == real_broker:
+                account_no = acc_no
+                break
+        if not account_no:
+            return jsonify({'shares_held': 0})
+        return jsonify({'shares_held': _get_account_shares(account_no, code)})
 
     @app.route('/api/cash_dividends', methods=['POST'])
     def add_cash_dividend():
