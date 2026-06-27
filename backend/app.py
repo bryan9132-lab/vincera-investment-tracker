@@ -1702,12 +1702,21 @@ def create_app():
         cd = CashDividend.query.get(div_id)
         if not cd:
             return jsonify({'error': '找不到記錄'}), 404
-        if cd.deposited:
-            return jsonify({'error': '已入帳記錄無法刪除，請先處理資金細項中的對應記錄'}), 400
         snap = cd.to_dict()
+
+        # If already deposited, reverse the linked CashEntry and balance first
+        if cd.deposited and cd.cash_entry_id:
+            entry = CashEntry.query.get(cd.cash_entry_id)
+            if entry:
+                acct = CashAccount.query.get(entry.account_id)
+                if acct:
+                    acct.balance -= entry.amount
+                    _recalculate_cash_balance(acct.id)
+                db.session.delete(entry)
+
         db.session.delete(cd)
         db.session.commit()
-        _audit('delete', 'cash_dividends', div_id, '刪除現金股利', snap)
+        _audit('delete', 'cash_dividends', div_id, '刪除現金股利（含已入帳記錄回滾）' if snap.get('deposited') else '刪除現金股利', snap)
         return jsonify({'status': 'ok'})
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1845,12 +1854,28 @@ def create_app():
         sd = StockDividend.query.get(div_id)
         if not sd:
             return jsonify({'error': '找不到記錄'}), 404
-        if sd.allocated:
-            return jsonify({'error': '已入集保記錄無法刪除，請先處理對應庫存'}), 400
         snap = sd.to_dict()
+
+        # If already allocated, find and remove the synthetic Transaction we created,
+        # then recalculate positions so shares/cost reverse cleanly
+        pos_entity_for_cleanup = None
+        if sd.allocated:
+            pos_entity_for_cleanup = _dividend_position_entity(sd.entity, sd.broker)
+            matching_txn = (Transaction.query
+                .filter_by(entity=pos_entity_for_cleanup, security_code=sd.security_code,
+                          shares=sd.bonus_shares, price=0)
+                .filter(Transaction.memo.like(f'股票股利入集保%{sd.period_note or ""}%'))
+                .first())
+            if matching_txn:
+                db.session.delete(matching_txn)
+
         db.session.delete(sd)
         db.session.commit()
-        _audit('delete', 'stock_dividends', div_id, '刪除股票股利', snap)
+        if pos_entity_for_cleanup:
+            recalculate_positions(pos_entity_for_cleanup)
+            db.session.commit()
+        _audit('delete', 'stock_dividends', div_id,
+               '刪除股票股利（含已入集保記錄回滾）' if snap.get('allocated') else '刪除股票股利', snap)
         return jsonify({'status': 'ok'})
 
     # ── Audit log ────────────────────────────────────────────────────────────

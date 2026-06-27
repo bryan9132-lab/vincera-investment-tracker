@@ -625,7 +625,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     </div>
     <div class="modal-field">
       <label>現金股利總額（自動計算）</label>
-      <input type="number" id="cd-total" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+      <input type="number" id="cd-total" oninput="cdTotalManuallyEdited=true" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
     </div>
     <div class="modal-row">
       <div class="modal-field">
@@ -1908,7 +1908,8 @@ function renderCashDividends() {
       ? `<span style="color:var(--positive);font-size:12px">✅ 已入帳</span>`
       : `<span style="color:var(--muted);font-size:12px">待入帳</span>`;
     const actionBtn = d.deposited
-      ? ''
+      ? `<button class="btn btn-ghost btn-xs" onclick="openEditCashDividend(${d.id})" style="margin-right:4px">編輯</button>
+         <button class="btn btn-ghost btn-xs" onclick="deleteCashDividend(${d.id})">刪除</button>`
       : `<button class="btn btn-ghost btn-xs" onclick="openEditCashDividend(${d.id})" style="margin-right:4px">編輯</button>
          <button class="btn btn-success btn-xs" onclick="openDepositModal(${d.id})" style="margin-right:4px">標記已入帳</button>
          <button class="btn btn-ghost btn-xs" onclick="deleteCashDividend(${d.id})">刪除</button>`;
@@ -1940,7 +1941,8 @@ function renderStockDividends() {
       ? `<span style="color:var(--positive);font-size:12px">✅ 已入集保</span>`
       : `<span style="color:var(--muted);font-size:12px">待入集保 (${fmt(d.bonus_shares)}股暫不可賣)</span>`;
     const actionBtn = d.allocated
-      ? ''
+      ? `<button class="btn btn-ghost btn-xs" onclick="openEditStockDividend(${d.id})" style="margin-right:4px">編輯</button>
+         <button class="btn btn-ghost btn-xs" onclick="deleteStockDividend(${d.id})">刪除</button>`
       : `<button class="btn btn-ghost btn-xs" onclick="openEditStockDividend(${d.id})" style="margin-right:4px">編輯</button>
          <button class="btn btn-success btn-xs" onclick="allocateStockDividend(${d.id})" style="margin-right:4px">標記已入集保</button>
          <button class="btn btn-ghost btn-xs" onclick="deleteStockDividend(${d.id})">刪除</button>`;
@@ -1988,22 +1990,25 @@ async function onDividendFieldChange(kind) {
   } catch(e){}
 }
 
+let cdTotalManuallyEdited = false;
 function calcCashDividendTotal() {
+  if (cdTotalManuallyEdited) return;  // don't overwrite Sophie's manual entry
   const shares = parseFloat(document.getElementById('cd-shares').value) || 0;
   const per    = parseFloat(document.getElementById('cd-per-share').value) || 0;
-  document.getElementById('cd-total').value = fmt(Math.round(shares * per));
+  document.getElementById('cd-total').value = Math.round(shares * per);
 }
 
 function calcStockDividendTotal() {
   const shares = parseFloat(document.getElementById('sd-shares').value) || 0;
   const ratio  = parseFloat(document.getElementById('sd-ratio').value) || 0;
-  document.getElementById('sd-total').value = fmt(Math.round(shares * ratio));
+  document.getElementById('sd-total').value = Math.round(shares * ratio);
 }
 
 // ── Cash Dividend Modal ──────────────────────────────────────────────────────
 let cashDividendEditId = null;
 function openCashDividendModal() {
   cashDividendEditId = null;
+  cdTotalManuallyEdited = false;
   document.getElementById('cd-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('cd-entity').value = 'RC';
   document.getElementById('cd-broker').value = '元大';
@@ -2020,7 +2025,12 @@ function openCashDividendModal() {
 function openEditCashDividend(id) {
   const d = allCashDividends.find(x => x.id === id);
   if (!d) return;
+  if (d.deposited) {
+    const ok = confirm('此筆已標記入帳。編輯只會更新股利記錄本身的數字，\n不會自動修改資金細項中已建立的入帳記錄。\n\n若金額有誤，建議改用「刪除」（會自動還原資金細項），再重新新增一筆正確的記錄。\n\n仍要繼續編輯嗎？');
+    if (!ok) return;
+  }
   cashDividendEditId = id;
+  cdTotalManuallyEdited = true;  // existing total_amount already reflects what Sophie wants, don't auto-overwrite it
   document.getElementById('cd-date').value = d.announce_date;
   document.getElementById('cd-entity').value = d.entity;
   document.getElementById('cd-broker').value = d.broker;
@@ -2066,9 +2076,13 @@ async function submitCashDividend() {
   }
 }
 async function deleteCashDividend(id) {
-  if (!confirm('確定要刪除這筆現金股利記錄嗎？')) return;
+  const d = allCashDividends.find(x => x.id === id);
+  const msg = (d && d.deposited)
+    ? '此筆已標記入帳，刪除會同時移除資金細項中對應的記錄並還原帳戶餘額。確定要刪除嗎？'
+    : '確定要刪除這筆現金股利記錄嗎？';
+  if (!confirm(msg)) return;
   const res = await fetch(`${API}/api/cash_dividends/${id}`, { method: 'DELETE' });
-  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); }
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); loadCashLedger(); }
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
 }
 
@@ -2133,6 +2147,10 @@ function openStockDividendModal() {
 function openEditStockDividend(id) {
   const d = allStockDividends.find(x => x.id === id);
   if (!d) return;
+  if (d.allocated) {
+    const ok = confirm('此筆已標記入集保。編輯只會更新股利記錄本身的數字，\n不會自動修改庫存中已增加的股數。\n\n若數字有誤，建議改用「刪除」（會自動還原庫存股數），再重新新增一筆正確的記錄。\n\n仍要繼續編輯嗎？');
+    if (!ok) return;
+  }
   stockDividendEditId = id;
   document.getElementById('sd-date').value = d.announce_date;
   document.getElementById('sd-entity').value = d.entity;
@@ -2177,9 +2195,13 @@ async function submitStockDividend() {
   }
 }
 async function deleteStockDividend(id) {
-  if (!confirm('確定要刪除這筆股票股利記錄嗎？')) return;
+  const d = allStockDividends.find(x => x.id === id);
+  const msg = (d && d.allocated)
+    ? '此筆已標記入集保，刪除會同時移除庫存中對應的股數並重新計算成本。確定要刪除嗎？'
+    : '確定要刪除這筆股票股利記錄嗎？';
+  if (!confirm(msg)) return;
   const res = await fetch(`${API}/api/stock_dividends/${id}`, { method: 'DELETE' });
-  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); }
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); loadHoldings(); }
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
 }
 async function allocateStockDividend(id) {
