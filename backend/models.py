@@ -483,6 +483,7 @@ class StockDividend(db.Model):
     expected_allocate_date = db.Column(db.Date,         nullable=True)  # 預計撥券日期
     allocated              = db.Column(db.Boolean,       default=False) # Sophie manually confirms shares landed (集保)
     allocated_at           = db.Column(db.DateTime,      nullable=True)
+    transaction_id         = db.Column(db.Integer,       db.ForeignKey('transactions.id'), nullable=True)  # linked synthetic Transaction once allocated
     created_at             = db.Column(db.DateTime,      default=datetime.utcnow)
 
     security               = db.relationship('Security', backref='stock_dividends')
@@ -502,4 +503,5 @@ class StockDividend(db.Model):
             'expected_allocate_date': self.expected_allocate_date.isoformat() if self.expected_allocate_date else None,
             'allocated':              self.allocated,
             'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
+            'transaction_id':         self.transaction_id,
         }

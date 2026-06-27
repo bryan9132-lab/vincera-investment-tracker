@@ -49,6 +49,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _migrate_add_price_type()
+        _migrate_add_stock_dividend_transaction_id()
         _seed_securities()
         _seed_cash_accounts()
 
@@ -1843,6 +1844,7 @@ def create_app():
 
         sd.allocated    = True
         sd.allocated_at = datetime.utcnow()
+        sd.transaction_id = txn.id
         db.session.commit()
         _audit('edit', 'stock_dividends', sd.id,
 
@@ -1861,11 +1863,16 @@ def create_app():
         pos_entity_for_cleanup = None
         if sd.allocated:
             pos_entity_for_cleanup = _dividend_position_entity(sd.entity, sd.broker)
-            matching_txn = (Transaction.query
-                .filter_by(entity=pos_entity_for_cleanup, security_code=sd.security_code,
-                          shares=sd.bonus_shares, price=0)
-                .filter(Transaction.memo.like(f'股票股利入集保%{sd.period_note or ""}%'))
-                .first())
+            matching_txn = None
+            if sd.transaction_id:
+                matching_txn = Transaction.query.get(sd.transaction_id)
+            if not matching_txn:
+                # Legacy fallback for rows allocated before transaction_id existed
+                matching_txn = (Transaction.query
+                    .filter_by(entity=pos_entity_for_cleanup, security_code=sd.security_code,
+                              shares=sd.bonus_shares, price=0)
+                    .filter(Transaction.memo.like(f'股票股利入集保%{sd.period_note or ""}%'))
+                    .first())
             if matching_txn:
                 db.session.delete(matching_txn)
 
@@ -1913,6 +1920,17 @@ def _migrate_add_price_type():
     try:
         db.session.execute(db.text(
             "ALTER TABLE securities ADD COLUMN IF NOT EXISTS price_type VARCHAR(10) DEFAULT '成交價'"
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _migrate_add_stock_dividend_transaction_id():
+    """Add transaction_id column to stock_dividends table if it doesn't exist yet."""
+    try:
+        db.session.execute(db.text(
+            "ALTER TABLE stock_dividends ADD COLUMN IF NOT EXISTS transaction_id INTEGER REFERENCES transactions(id)"
         ))
         db.session.commit()
     except Exception:
