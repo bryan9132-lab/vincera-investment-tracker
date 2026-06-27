@@ -245,7 +245,7 @@ def create_app():
     # ── Get current positions ────────────────────────────────────────────────
     @app.route('/api/positions', methods=['GET'])
     def get_positions():
-        """Return all current positions grouped by entity"""
+        """Return all current positions grouped by entity, with pending 股票股利 attached"""
         positions = Position.query.filter(Position.shares > 0).all()
         result    = {}
         for pos in positions:
@@ -253,7 +253,21 @@ def create_app():
             if ent not in result:
                 result[ent] = []
             result[ent].append(pos.to_dict())
+
+        # Attach pending (not yet allocated) stock dividends to their entity+code
+        pending = StockDividend.query.filter_by(allocated=False).all()
+        for sd in pending:
+            pos_entity = _dividend_position_entity(sd.entity, sd.broker)
+            if pos_entity in result:
+                for p in result[pos_entity]:
+                    if p['security_code'] == sd.security_code:
+                        p.setdefault('pending_stock_dividends', []).append({
+                            'id': sd.id,
+                            'bonus_shares': sd.bonus_shares,
+                            'expected_allocate_date': sd.expected_allocate_date.isoformat() if sd.expected_allocate_date else None,
+                        })
         return jsonify(result)
+
 
     # ── Realized P&L ────────────────────────────────────────────────────────
     @app.route('/api/realized_pnl', methods=['GET'])
@@ -1575,7 +1589,8 @@ def create_app():
 
         shares_held = float(data.get('shares_held', 0))
         div_per_share = float(data.get('dividend_per_share', 0))
-        total_amount = round(shares_held * div_per_share)
+        override = data.get('total_amount_override')
+        total_amount = round(float(override)) if override is not None else round(shares_held * div_per_share)
 
         expected_date = None
         if data.get('expected_deposit_date'):
@@ -1738,8 +1753,9 @@ def create_app():
     def allocate_stock_dividend(div_id):
         """
         Sophie clicks '已入集保' once the bonus shares are confirmed tradeable.
-        This folds the bonus shares into the real Position (shares increase,
-        total_cost stays the same → avg_cost drops automatically).
+        Creates a zero-cost Transaction for the bonus shares, then replays
+        recalculate_positions() so it survives future price updates / edits
+        (Position is always derived from Transaction history, never patched directly).
         """
         sd = StockDividend.query.get(div_id)
         if not sd:
@@ -1748,18 +1764,36 @@ def create_app():
             return jsonify({'error': '此筆已標記為入集保'}), 400
 
         pos_entity = _dividend_position_entity(sd.entity, sd.broker)
-        pos = Position.query.filter_by(entity=pos_entity, security_code=sd.security_code).first()
-        if not pos:
-            return jsonify({'error': f'找不到對應庫存：{pos_entity} {sd.security_code}'}), 404
+        sec = Security.query.get(sd.security_code)
 
-        pos.shares = round(pos.shares + sd.bonus_shares, 4)
-        pos.avg_cost = round(pos.total_cost / pos.shares, 4) if pos.shares else 0
-        # total_cost stays unchanged — shares increase, cost basis spreads thinner
+        # account_no: reuse whatever account this entity+broker combo normally trades through
+        account_no = None
+        for acc_no, info in ACCOUNT_MAP.items():
+            if info['entity'] == pos_entity and info['broker'] == (
+                '國泰' if sd.broker == '私銀國泰' else sd.broker
+            ):
+                account_no = acc_no
+                break
+        if not account_no:
+            return jsonify({'error': f'找不到對應交易帳戶：{pos_entity} {sd.broker}'}), 404
+
+        txn = Transaction(
+            trade_date=date.today(), settle_date=date.today(),
+            entity=pos_entity, broker=('國泰' if sd.broker=='私銀國泰' else sd.broker),
+            account_no=account_no, security_code=sd.security_code,
+            security_name=sec.name if sec else sd.security_code,
+            shares=sd.bonus_shares, price=0, gross_amount=0, fee=0, tax=0, net_amount=0,
+            memo=f'股票股利入集保（{sd.period_note or ""}）',
+        )
+        db.session.add(txn)
+        db.session.flush()
+        recalculate_positions(pos_entity)
 
         sd.allocated    = True
         sd.allocated_at = datetime.utcnow()
         db.session.commit()
         _audit('edit', 'stock_dividends', sd.id,
+
                f'股票股利已入集保 {pos_entity} {sd.security_code} +{sd.bonus_shares}股', sd.to_dict())
         return jsonify(sd.to_dict())
 
