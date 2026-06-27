@@ -1507,6 +1507,26 @@ def create_app():
                 })
             output[label] = positions
 
+        # Attach pending (not yet allocated) stock dividends to matching broker label
+        broker_label_map = {
+            ('RC', '統一'):   'RC統一',   ('RC', '元大'):   'RC元大',
+            ('華強', '統一'): '華強統一', ('華強', '元大'): '華強元大',
+            ('RC', '私銀國泰'):   '私銀RC',
+            ('華強', '私銀國泰'): '私銀華強',
+        }
+        pending = StockDividend.query.filter_by(allocated=False).all()
+        for sd in pending:
+            label = broker_label_map.get((sd.entity, sd.broker))
+            if not label or label not in output:
+                continue
+            for p in output[label]:
+                if p['security_code'] == sd.security_code:
+                    p.setdefault('pending_stock_dividends', []).append({
+                        'id': sd.id,
+                        'bonus_shares': sd.bonus_shares,
+                        'expected_allocate_date': sd.expected_allocate_date.isoformat() if sd.expected_allocate_date else None,
+                    })
+
         return jsonify(output)
 
 
@@ -1614,10 +1634,22 @@ def create_app():
         if not cd:
             return jsonify({'error': '找不到記錄'}), 404
         data = request.json
+        if 'announce_date' in data:
+            cd.announce_date = date.fromisoformat(data['announce_date'])
+        if 'entity' in data:
+            cd.entity = data['entity']
+        if 'broker' in data:
+            cd.broker = data['broker']
+        if 'security_code' in data:
+            sec = Security.query.get(data['security_code'])
+            if not sec:
+                return jsonify({'error': f'找不到股票代號：{data["security_code"]}'}), 404
+            cd.security_code = data['security_code']
         if 'shares_held' in data or 'dividend_per_share' in data:
             cd.shares_held        = float(data.get('shares_held', cd.shares_held))
             cd.dividend_per_share = float(data.get('dividend_per_share', cd.dividend_per_share))
-            cd.total_amount       = round(cd.shares_held * cd.dividend_per_share)
+            override = data.get('total_amount_override')
+            cd.total_amount = round(float(override)) if override is not None else round(cd.shares_held * cd.dividend_per_share)
         if 'period_note' in data:
             cd.period_note = data['period_note']
         if 'expected_deposit_date' in data:
@@ -1736,6 +1768,17 @@ def create_app():
         if not sd:
             return jsonify({'error': '找不到記錄'}), 404
         data = request.json
+        if 'announce_date' in data:
+            sd.announce_date = date.fromisoformat(data['announce_date'])
+        if 'entity' in data:
+            sd.entity = data['entity']
+        if 'broker' in data:
+            sd.broker = data['broker']
+        if 'security_code' in data:
+            sec = Security.query.get(data['security_code'])
+            if not sec:
+                return jsonify({'error': f'找不到股票代號：{data["security_code"]}'}), 404
+            sd.security_code = data['security_code']
         if 'shares_held' in data or 'dividend_ratio' in data:
             sd.shares_held    = float(data.get('shares_held', sd.shares_held))
             sd.dividend_ratio = float(data.get('dividend_ratio', sd.dividend_ratio))

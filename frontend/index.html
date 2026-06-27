@@ -1909,7 +1909,8 @@ function renderCashDividends() {
       : `<span style="color:var(--muted);font-size:12px">待入帳</span>`;
     const actionBtn = d.deposited
       ? ''
-      : `<button class="btn btn-success btn-xs" onclick="openDepositModal(${d.id})" style="margin-right:4px">標記已入帳</button>
+      : `<button class="btn btn-ghost btn-xs" onclick="openEditCashDividend(${d.id})" style="margin-right:4px">編輯</button>
+         <button class="btn btn-success btn-xs" onclick="openDepositModal(${d.id})" style="margin-right:4px">標記已入帳</button>
          <button class="btn btn-ghost btn-xs" onclick="deleteCashDividend(${d.id})">刪除</button>`;
     return `<tr>
       <td class="left">${d.announce_date}</td>
@@ -1940,7 +1941,8 @@ function renderStockDividends() {
       : `<span style="color:var(--muted);font-size:12px">待入集保 (${fmt(d.bonus_shares)}股暫不可賣)</span>`;
     const actionBtn = d.allocated
       ? ''
-      : `<button class="btn btn-success btn-xs" onclick="allocateStockDividend(${d.id})" style="margin-right:4px">標記已入集保</button>
+      : `<button class="btn btn-ghost btn-xs" onclick="openEditStockDividend(${d.id})" style="margin-right:4px">編輯</button>
+         <button class="btn btn-success btn-xs" onclick="allocateStockDividend(${d.id})" style="margin-right:4px">標記已入集保</button>
          <button class="btn btn-ghost btn-xs" onclick="deleteStockDividend(${d.id})">刪除</button>`;
     return `<tr>
       <td class="left">${d.announce_date}</td>
@@ -1999,7 +2001,9 @@ function calcStockDividendTotal() {
 }
 
 // ── Cash Dividend Modal ──────────────────────────────────────────────────────
+let cashDividendEditId = null;
 function openCashDividendModal() {
+  cashDividendEditId = null;
   document.getElementById('cd-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('cd-entity').value = 'RC';
   document.getElementById('cd-broker').value = '元大';
@@ -2010,6 +2014,24 @@ function openCashDividendModal() {
   document.getElementById('cd-total').value = '';
   document.getElementById('cd-period').value = '';
   document.getElementById('cd-deposit-date').value = '';
+  document.querySelector('#cash-div-modal .modal-title').textContent = '新增現金股利';
+  document.getElementById('cash-div-modal').style.display = 'flex';
+}
+function openEditCashDividend(id) {
+  const d = allCashDividends.find(x => x.id === id);
+  if (!d) return;
+  cashDividendEditId = id;
+  document.getElementById('cd-date').value = d.announce_date;
+  document.getElementById('cd-entity').value = d.entity;
+  document.getElementById('cd-broker').value = d.broker;
+  document.getElementById('cd-code').value = d.security_code;
+  document.getElementById('cd-name').value = d.security_name;
+  document.getElementById('cd-shares').value = d.shares_held;
+  document.getElementById('cd-per-share').value = d.dividend_per_share;
+  document.getElementById('cd-total').value = d.total_amount;
+  document.getElementById('cd-period').value = d.period_note || '';
+  document.getElementById('cd-deposit-date').value = d.expected_deposit_date || '';
+  document.querySelector('#cash-div-modal .modal-title').textContent = '編輯現金股利';
   document.getElementById('cash-div-modal').style.display = 'flex';
 }
 function closeCashDividendModal() {
@@ -2028,16 +2050,19 @@ async function submitCashDividend() {
     period_note: document.getElementById('cd-period').value,
     expected_deposit_date: document.getElementById('cd-deposit-date').value || null,
   };
-  const res = await fetch(`${API}/api/cash_dividends`, {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  const isEdit = cashDividendEditId !== null;
+  const url    = isEdit ? `${API}/api/cash_dividends/${cashDividendEditId}` : `${API}/api/cash_dividends`;
+  const method = isEdit ? 'PUT' : 'POST';
+  const res = await fetch(url, {
+    method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
   if (res.ok) {
     closeCashDividendModal();
-    toast('✅ 現金股利已新增', 'success');
+    toast(isEdit ? '✅ 現金股利已更新' : '✅ 現金股利已新增', 'success');
     loadDividends();
   } else {
     const err = await res.json();
-    toast(`❌ ${err.error||'新增失敗'}`, 'error');
+    toast(`❌ ${err.error||'操作失敗'}`, 'error');
   }
 }
 async function deleteCashDividend(id) {
@@ -2089,7 +2114,9 @@ async function confirmDeposit() {
 }
 
 // ── Stock Dividend Modal ─────────────────────────────────────────────────────
+let stockDividendEditId = null;
 function openStockDividendModal() {
+  stockDividendEditId = null;
   document.getElementById('sd-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('sd-entity').value = 'RC';
   document.getElementById('sd-broker').value = '元大';
@@ -2100,6 +2127,24 @@ function openStockDividendModal() {
   document.getElementById('sd-total').value = '';
   document.getElementById('sd-period').value = '';
   document.getElementById('sd-allocate-date').value = '';
+  document.querySelector('#stock-div-modal .modal-title').textContent = '新增股票股利';
+  document.getElementById('stock-div-modal').style.display = 'flex';
+}
+function openEditStockDividend(id) {
+  const d = allStockDividends.find(x => x.id === id);
+  if (!d) return;
+  stockDividendEditId = id;
+  document.getElementById('sd-date').value = d.announce_date;
+  document.getElementById('sd-entity').value = d.entity;
+  document.getElementById('sd-broker').value = d.broker;
+  document.getElementById('sd-code').value = d.security_code;
+  document.getElementById('sd-name').value = d.security_name;
+  document.getElementById('sd-shares').value = d.shares_held;
+  document.getElementById('sd-ratio').value = d.dividend_ratio;
+  document.getElementById('sd-total').value = d.bonus_shares;
+  document.getElementById('sd-period').value = d.period_note || '';
+  document.getElementById('sd-allocate-date').value = d.expected_allocate_date || '';
+  document.querySelector('#stock-div-modal .modal-title').textContent = '編輯股票股利';
   document.getElementById('stock-div-modal').style.display = 'flex';
 }
 function closeStockDividendModal() {
@@ -2116,16 +2161,19 @@ async function submitStockDividend() {
     period_note: document.getElementById('sd-period').value,
     expected_allocate_date: document.getElementById('sd-allocate-date').value || null,
   };
-  const res = await fetch(`${API}/api/stock_dividends`, {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  const isEdit = stockDividendEditId !== null;
+  const url    = isEdit ? `${API}/api/stock_dividends/${stockDividendEditId}` : `${API}/api/stock_dividends`;
+  const method = isEdit ? 'PUT' : 'POST';
+  const res = await fetch(url, {
+    method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
   if (res.ok) {
     closeStockDividendModal();
-    toast('✅ 股票股利已新增', 'success');
+    toast(isEdit ? '✅ 股票股利已更新' : '✅ 股票股利已新增', 'success');
     loadDividends();
   } else {
     const err = await res.json();
-    toast(`❌ ${err.error||'新增失敗'}`, 'error');
+    toast(`❌ ${err.error||'操作失敗'}`, 'error');
   }
 }
 async function deleteStockDividend(id) {
