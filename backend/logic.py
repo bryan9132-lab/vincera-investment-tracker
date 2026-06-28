@@ -8,7 +8,7 @@ import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import date, datetime, timedelta
-from .models import db, Transaction, Position, Security, ACCOUNT_MAP
+from .models import db, Transaction, Position, Security, ACCOUNT_MAP, CashDividend
 
 
 def recalculate_positions(entity: str = None):
@@ -232,3 +232,105 @@ def calculate_realized_pnl(entity: str = None):
         result[ent] = round(realized, 0)
 
     return result
+
+
+def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: str = None):
+    """
+    Build the full audit trail behind 已實現損益 — every event that
+    contributes to realized P&L, with enough detail (avg cost, cost basis)
+    for Sophie to see exactly where each number came from.
+
+    Read-only by design: every row here is derived from other tabs
+    (交易記錄 for 股票賣出, 股利管理 for 現金股利). Nothing is editable here.
+
+    category: '股票買賣' | '貨幣基金' | '現金股利' | None (all)
+    NOTE: 貨幣基金獲利/利息 isn't modeled as its own entry type in VIT yet
+    (CASH_ENTRY_TYPES has no '基金獲利' type), so that category returns
+    an empty list for now until we decide how Sophie should record it.
+    """
+    from .models import ACCOUNT_MAP
+    rows = []
+
+    # ── 股票買賣 (weighted-average-cost replay, same method as calculate_realized_pnl) ──
+    if category in (None, '', '股票買賣'):
+        entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
+        for ent in entities:
+            q = (Transaction.query
+                 .filter_by(entity=ent)
+                 .filter(Transaction.security_code.isnot(None))
+                 .order_by(Transaction.trade_date, Transaction.id))
+            if broker:
+                q = q.filter_by(broker=broker)
+            txns = q.all()
+
+            holdings = {}  # code -> {shares, total_cost}
+            for t in txns:
+                code = t.security_code
+                if code not in holdings:
+                    holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
+                if t.shares > 0:
+                    holdings[code]['shares']     += t.shares
+                    holdings[code]['total_cost'] += t.gross_amount + t.fee
+                else:
+                    if holdings[code]['shares'] > 0:
+                        sell_qty   = abs(t.shares)
+                        avg_cost   = holdings[code]['total_cost'] / holdings[code]['shares']
+                        cost_basis = avg_cost * sell_qty
+                        realized   = t.net_amount - cost_basis
+                        rows.append({
+                            'date':            t.trade_date.isoformat() if t.trade_date else None,
+                            'entity':          ent,
+                            'broker':          t.broker,
+                            'category':        '股票買賣',
+                            'security_code':   code,
+                            'security_name':   t.security_name or code,
+                            'shares':          sell_qty,
+                            'price':           t.price,
+                            'gross_amount':    t.gross_amount,
+                            'fee':             t.fee,
+                            'tax':             t.tax,
+                            'net_amount':      t.net_amount,
+                            'avg_cost':        round(avg_cost, 4),
+                            'cost_basis':      round(cost_basis, 0),
+                            'realized_pnl':    round(realized, 0),
+                            'note':            None,
+                        })
+                        holdings[code]['shares']     -= sell_qty
+                        holdings[code]['total_cost'] -= avg_cost * sell_qty
+                        if holdings[code]['shares'] < 0.001:
+                            holdings[code]['shares']     = 0
+                            holdings[code]['total_cost'] = 0
+
+    # ── 現金股利 (counted on announce_date, regardless of deposit/maturity date) ──
+    if category in (None, '', '現金股利'):
+        q = CashDividend.query
+        if entity:
+            q = q.filter_by(entity=entity)
+        if broker:
+            q = q.filter_by(broker=broker)
+        for cd in q.order_by(CashDividend.announce_date).all():
+            rows.append({
+                'date':            cd.announce_date.isoformat() if cd.announce_date else None,
+                'entity':          cd.entity,
+                'broker':          cd.broker,
+                'category':        '現金股利',
+                'security_code':   cd.security_code,
+                'security_name':   cd.security.name if cd.security else cd.security_code,
+                'shares':          cd.shares_held,
+                'price':           cd.dividend_per_share,
+                'gross_amount':    cd.total_amount,
+                'fee':             None,
+                'tax':             None,
+                'net_amount':      cd.total_amount,
+                'avg_cost':        None,
+                'cost_basis':      None,
+                'realized_pnl':    cd.total_amount,
+                'note':            '待入帳' if not cd.deposited else None,
+            })
+
+    # ── 貨幣基金 (申購/贖回利息) — not yet modeled as its own entry type ──
+    # Placeholder: returns nothing for this category until a dedicated
+    # CASH_ENTRY_TYPES entry (e.g. '基金獲利') exists to source this from.
+
+    rows.sort(key=lambda r: r['date'] or '')
+    return rows

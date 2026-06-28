@@ -277,6 +277,18 @@ def create_app():
         result = calculate_realized_pnl()
         return jsonify(result)
 
+    @app.route('/api/realized_pnl_ledger', methods=['GET'])
+    def get_realized_pnl_ledger_route():
+        """Full audit-trail ledger behind 已實現損益 — read-only.
+        Optional filters: entity, broker, category (股票買賣/貨幣基金/現金股利)"""
+        from .logic import get_realized_pnl_ledger
+        rows = get_realized_pnl_ledger(
+            entity=request.args.get('entity') or None,
+            broker=request.args.get('broker') or None,
+            category=request.args.get('category') or None,
+        )
+        return jsonify(rows)
+
     # ── Update market prices ─────────────────────────────────────────────────
     @app.route('/api/prices/update', methods=['POST'])
     def update_prices():
