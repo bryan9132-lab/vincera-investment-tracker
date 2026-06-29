@@ -1700,7 +1700,7 @@ function renderLedgerTable(entries) {
     const delBtn = `<button class="btn btn-danger btn-sm" onclick="deleteCashEntry(${e.id})" title="刪除">🗑</button>`;
 
     return `<tr id="ledger-row-${e.id}">
-      <td class="left">${e.entry_date}</td>
+      <td class="left" id="date-cell-${e.id}">${e.entry_date}</td>
       <td class="left" style="font-size:12px;color:var(--muted)">${acctCell}</td>
       <td class="left">${badge}${autoTag}</td>
       <td class="left" id="desc-cell-${e.id}">${desc}</td>
@@ -1715,10 +1715,12 @@ function renderLedgerTable(entries) {
 function startInlineEdit(id) {
   const e = allLedgerEntries.find(x => x.id === id);
   if(!e) return;
+  const dateCell = document.getElementById(`date-cell-${id}`);
   const descCell = document.getElementById(`desc-cell-${id}`);
   const amtCell  = document.getElementById(`amt-cell-${id}`);
   if(!descCell || !amtCell) return;
 
+  if(dateCell) dateCell.innerHTML = `<input id="edit-date-${id}" type="date" value="${e.entry_date}" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:3px 6px">`;
   descCell.innerHTML = `<input id="edit-desc-${id}" value="${e.description||''}" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:3px 6px;width:120px">`;
   amtCell.innerHTML  = `<input id="edit-amt-${id}" value="${e.amount}" type="number" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;padding:3px 6px;width:90px">
     <button class="btn btn-success btn-sm" onclick="saveInlineEdit(${id})" style="margin-left:4px">✓</button>
@@ -1726,13 +1728,16 @@ function startInlineEdit(id) {
 }
 
 async function saveInlineEdit(id) {
+  const entry_date = document.getElementById(`edit-date-${id}`)?.value;
   const desc   = document.getElementById(`edit-desc-${id}`)?.value ?? '';
   const amount = parseFloat(document.getElementById(`edit-amt-${id}`)?.value);
   if(isNaN(amount)) { toast('請填入有效金額','error'); return; }
   try {
+    const body = {description: desc, amount};
+    if(entry_date) body.entry_date = entry_date;
     const res = await fetch(`${API}/api/cash/entry/${id}`, {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({description: desc, amount})
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if(res.ok) { toast('✅ 已更新','success'); loadCashLedger(); loadCashSummary(); }

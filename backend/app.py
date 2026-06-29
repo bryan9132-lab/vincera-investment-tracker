@@ -756,8 +756,8 @@ def create_app():
                 return jsonify({'error': '其他收入請填正數金額'}), 400
 
         elif entry_type == '其他支出':
-            if amount >= 0:
-                return jsonify({'error': '其他支出請填負數金額'}), 400
+            if amount <= 0:
+                return jsonify({'error': '其他支出請填正數金額'}), 400
 
         elif entry_type == '轉出賬戶':
             target_id = data.get('target_account_id', '').strip()
@@ -794,6 +794,11 @@ def create_app():
                 return jsonify({'error': '貸款功能只限私銀帳戶'}), 400
 
         try:
+            # Sophie now enters 其他支出 as a positive number; we record it as
+            # an outflow internally so account balances still decrease correctly.
+            if entry_type == '其他支出':
+                amount = -abs(amount)
+
             if entry_type in ('轉出賬戶', '股東往來（借）', '股東往來（還）'):
                 target  = CashAccount.query.get(data['target_account_id'])
 
