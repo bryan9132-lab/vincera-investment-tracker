@@ -133,26 +133,32 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
     #   買入 6949 沛爾生醫 359.50 1.000 359,500 224 0 ...
 
     # Format A pattern (個人當日交易明細表 — action=買進/賣出, shares may start with .)
+    # NOTE: do NOT require a leading account-number/name prefix — 統一's report
+    # only prints "帳號 姓名" on the FIRST trade row of each account block;
+    # every later trade row (even a repeated stock code) omits it entirely.
+    # NOTE: stock name is also NOT required between code and price — when the
+    # name is long (e.g. 國泰費城半導體), 統一 wraps it onto the line AFTER the
+    # numeric row instead of printing it inline before the price. Since
+    # ParsedTrade never stores the name anyway, we just skip it if present on
+    # the same line and anchor on price, which always prints with 2 decimals.
     pattern_a = re.compile(
-        r'\d{6}-\d\s+'            # account number e.g. 600826-4
-        r'[\w\s]+?'               # customer name (non-greedy)
-        r'(買進|賣出)\s+'           # action
-        r'(\w+)\s+'               # stock code
-        r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'  # stock name
-        r'([\d,\.]+)\s+'          # price
-        r'(\.?[\d,\.]+)\s+'      # shares (may start with . e.g. .500)
-        r'([\d,]+)\s+'            # gross amount
-        r'([\d,]+)\s+'            # fee
-        r'([\d,]+)'               # tax
+        r'(買進|賣出)\s+'                  # action
+        r'(\w+)\s+'                       # stock code
+        r'(?:[^\d\n]+?\s+)?'              # optional inline stock name (same line only)
+        r'(\d+\.\d{1,2})\s+'              # price (always printed with decimals)
+        r'(\.?[\d,]+(?:\.\d+)?)\s+'       # shares (張, may start with . e.g. .500)
+        r'([\d,]+)\s+'                    # gross amount
+        r'([\d,]+)\s+'                    # fee
+        r'([\d,]+)'                       # tax
     )
 
     # Format B pattern (standard format — action=買入/賣出)
     pattern_b = re.compile(
         r'(賣出|買入)\s+'
         r'(\w+)\s+'
-        r'([\w\-\.]+(?:\s[\w\-\.]+)?)\s+'
-        r'([\d,\.]+)\s+'
-        r'(\.?[\d,\.]+)\s+'
+        r'(?:[^\d\n]+?\s+)?'
+        r'(\d+\.\d{1,2})\s+'
+        r'(\.?[\d,]+(?:\.\d+)?)\s+'
         r'([\d,]+)\s+'
         r'([\d,]+)\s+'
         r'([\d,]+)'
@@ -187,8 +193,8 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
     if matches_a:
         result.trades = _parse_matches(
             matches_a,
-            action_group=1, code_group=2, price_group=4,
-            zhang_group=5, gross_group=6, fee_group=7, tax_group=8,
+            action_group=1, code_group=2, price_group=3,
+            zhang_group=4, gross_group=5, fee_group=6, tax_group=7,
             sell_keywords={'賣出'}
         )
     else:
@@ -196,8 +202,8 @@ def parse_tuni(pdf_bytes: bytes) -> ParsedPDF:
         matches_b = list(pattern_b.finditer(text))
         result.trades = _parse_matches(
             matches_b,
-            action_group=1, code_group=2, price_group=4,
-            zhang_group=5, gross_group=6, fee_group=7, tax_group=8,
+            action_group=1, code_group=2, price_group=3,
+            zhang_group=4, gross_group=5, fee_group=6, tax_group=7,
             sell_keywords={'賣出'}
         )
 
