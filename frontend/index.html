@@ -186,6 +186,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="tab" onclick="switchTab('cashledger')">📒 資金細項</div>
     <div class="tab" onclick="switchTab('dividends')">🎁 股利管理</div>
     <div class="tab" onclick="switchTab('realizedpnl')">📈 已實現損益</div>
+    <div class="tab" onclick="switchTab('foreign')">🌐 海外投資</div>
   </div>
 
   <!-- ── Tab: Holdings ── -->
@@ -787,6 +788,109 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       </table>
     </div>
   </div>
+
+  <!-- ── Tab: 海外投資 (私RC/私華強) ── -->
+  <div class="tab-panel" id="tab-foreign">
+    <div class="toolbar">
+      <div class="toolbar-left" style="gap:14px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:12px;color:var(--muted)">USD/TWD</span>
+          <input type="number" step="0.0001" id="fx-usd" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:12px;padding:5px 8px">
+          <span style="font-size:12px;color:var(--muted)">JPY/TWD</span>
+          <input type="number" step="0.0001" id="fx-jpy" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:12px;padding:5px 8px">
+          <button class="btn btn-ghost btn-sm" onclick="saveFxRates()">儲存匯率</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="setForeignMode('holdings')" id="fmode-holdings-btn">📊 庫存</button>
+        <button class="btn btn-ghost" onclick="setForeignMode('entry')" id="fmode-entry-btn">✏ 手動輸入</button>
+        <button class="btn btn-ghost" onclick="setForeignMode('history')" id="fmode-history-btn">📋 交易記錄</button>
+      </div>
+    </div>
+
+    <!-- 庫存 mode -->
+    <div id="foreign-holdings-mode">
+      <div class="fund-grid" id="foreign-fund-grid"></div>
+    </div>
+
+    <!-- 手動輸入 mode -->
+    <div id="foreign-entry-mode" style="display:none">
+      <div class="card">
+        <div class="card-title">手動輸入海外交易（私RC／私華強）</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+          <div class="modal-field">
+            <label>帳戶</label>
+            <select id="fe-entity" class="filter-select" style="width:100%">
+              <option value="私RC">私RC</option>
+              <option value="私華強">私華強</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label>幣別</label>
+            <select id="fe-currency" class="filter-select" style="width:100%">
+              <option value="USD">USD</option>
+              <option value="JPY">JPY</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label>交易日期</label>
+            <input type="date" id="fe-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+          </div>
+          <div class="modal-field">
+            <label>交割日期（選填）</label>
+            <input type="date" id="fe-settle" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1.4fr .8fr 1fr 1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+          <div class="modal-field"><label>股票代號<br><span style="font-weight:400;color:var(--muted)">（日股請勿加.JP）</span></label><input type="text" id="fe-code" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>股票名稱</label><input type="text" id="fe-name" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>買/賣</label>
+            <select id="fe-side" class="filter-select" style="width:100%">
+              <option value="buy">買進</option><option value="sell">賣出</option>
+            </select>
+          </div>
+          <div class="modal-field"><label>股數</label><input type="number" step="any" id="fe-shares" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>單價</label><input type="number" step="any" id="fe-price" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>成交價金</label><input type="number" step="any" id="fe-gross" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>手續費</label><input type="number" step="any" id="fe-fee" value="0" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+          <div class="modal-field"><label>交易稅</label><input type="number" step="any" id="fe-tax" value="0" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
+        </div>
+        <div class="modal-field" style="margin-bottom:20px"><label>備註</label><input type="text" id="fe-memo" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:8px 10px"></div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="submitForeignEntry()">✅ 儲存交易</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 交易記錄 mode -->
+    <div id="foreign-history-mode" style="display:none">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <select id="fh-filter-entity" class="filter-select" onchange="loadForeignHistory()">
+            <option value="">全部帳戶</option>
+            <option value="私RC">私RC</option>
+            <option value="私華強">私華強</option>
+          </select>
+          <select id="fh-filter-currency" class="filter-select" onchange="loadForeignHistory()">
+            <option value="">全部幣別</option>
+            <option value="USD">USD</option>
+            <option value="JPY">JPY</option>
+          </select>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table>
+          <thead><tr>
+            <th class="left">日期</th><th class="left">帳戶</th><th class="left">幣別</th>
+            <th class="left">代號</th><th class="left">名稱</th>
+            <th>股數</th><th>單價</th><th>成交價金</th><th>手續費</th><th>交易稅</th><th>淨收付</th>
+            <th class="left">備註</th><th class="left">操作</th>
+          </tr></thead>
+          <tbody id="foreign-history-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 <div class="modal-overlay" id="edit-modal" style="display:none" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -827,7 +931,7 @@ document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
 function switchTab(name) {
-  const names = ['holdings','upload','history','cashsummary','cashledger','dividends','realizedpnl'];
+  const names = ['holdings','upload','history','cashsummary','cashledger','dividends','realizedpnl','foreign'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -837,6 +941,7 @@ function switchTab(name) {
   if(name==='cashledger')  loadCashLedger();
   if(name==='dividends')   loadDividends();
   if(name==='realizedpnl') loadRealizedPnlLedger();
+  if(name==='foreign')     { loadFxRates(); loadForeignHoldings(); }
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
@@ -2292,6 +2397,198 @@ async function allocateStockDividend(id) {
   const res = await fetch(`${API}/api/stock_dividends/${id}/allocate`, { method: 'POST' });
   if (res.ok) { toast('✅ 已入集保，庫存已更新', 'success'); loadDividends(); loadHoldings(); }
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 海外投資 (Foreign Investment) — 私RC / 私華強
+// ══════════════════════════════════════════════════════════════════════════
+const FOREIGN_ENTITIES   = ['私RC', '私華強'];
+const FOREIGN_CURRENCIES = ['USD', 'JPY'];
+
+function setForeignMode(mode) {
+  document.getElementById('foreign-holdings-mode').style.display = mode==='holdings' ? '' : 'none';
+  document.getElementById('foreign-entry-mode').style.display    = mode==='entry'    ? '' : 'none';
+  document.getElementById('foreign-history-mode').style.display  = mode==='history'  ? '' : 'none';
+  ['holdings','entry','history'].forEach(m => {
+    const btn = document.getElementById(`fmode-${m}-btn`);
+    btn.className = m===mode ? 'btn btn-primary' : 'btn btn-ghost';
+  });
+  if (mode==='holdings') loadForeignHoldings();
+  if (mode==='history')  loadForeignHistory();
+}
+
+async function loadFxRates() {
+  const res = await fetch(`${API}/api/foreign/positions`);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.fx_rates) {
+    if (data.fx_rates.USD) document.getElementById('fx-usd').value = data.fx_rates.USD;
+    if (data.fx_rates.JPY) document.getElementById('fx-jpy').value = data.fx_rates.JPY;
+  }
+}
+
+async function saveFxRates() {
+  const today = new Date().toISOString().slice(0,10);
+  const usd = document.getElementById('fx-usd').value;
+  const jpy = document.getElementById('fx-jpy').value;
+  const calls = [];
+  if (usd) calls.push(fetch(`${API}/api/fx_rates`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({currency:'USD', rate_date: today, rate: parseFloat(usd)})}));
+  if (jpy) calls.push(fetch(`${API}/api/fx_rates`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({currency:'JPY', rate_date: today, rate: parseFloat(jpy)})}));
+  await Promise.all(calls);
+  toast('✅ 匯率已儲存', 'success');
+  loadForeignHoldings();
+}
+
+async function loadForeignHoldings() {
+  const res = await fetch(`${API}/api/foreign/positions`);
+  const data = await res.json();
+  renderForeignHoldings(data);
+}
+
+function renderForeignHoldings(data) {
+  const grid = document.getElementById('foreign-fund-grid');
+  grid.innerHTML = '';
+  const fx = data.fx_rates || {};
+  const positions = data.positions || [];
+  const realized = data.realized_pnl || {};
+
+  FOREIGN_ENTITIES.forEach(ent => {
+    FOREIGN_CURRENCIES.forEach(cur => {
+      const posList = positions.filter(p => p.entity===ent && p.currency===cur);
+      const realKey = `${ent}_${cur}`;
+      const real = realized[realKey] || 0;
+      const unrealized = posList.reduce((s,p)=>s+(p.unrealized_pnl||0), 0);
+      const rate = fx[cur];
+      const rateNote = rate ? `（匯率 ${rate}）` : '（尚未設定匯率）';
+
+      let rowsHtml;
+      if (!posList.length) {
+        rowsHtml = `<div class="fund-empty">目前無持倉</div>`;
+      } else {
+        rowsHtml = posList.map(p => {
+          const pnl = p.unrealized_pnl;
+          return `<div class="stock-row">
+            <div class="stock-row-left">
+              <div class="stock-row-code">${p.security_code}</div>
+              <div class="stock-row-name">${p.security_name}</div>
+              <div class="stock-price">市價 ${p.last_price??'—'} ${cur}
+                <button class="btn btn-ghost btn-sm" style="margin-left:6px;padding:2px 8px"
+                  onclick="promptForeignPrice('${p.security_code}')">更新</button>
+              </div>
+            </div>
+            <div class="stock-row-right">
+              <div class="stock-shares">${fmt(p.shares)} 股</div>
+              <div class="stock-cost">@ ${p.avg_cost?.toFixed(4)??'—'}</div>
+              <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'} ${cur}</div>
+              <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
+                ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'} ${cur}
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      grid.innerHTML += `
+        <div class="card">
+          <div class="card-title">${ent}（${cur}）　${FOREIGN_REGIONS_JS[cur]||''}</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+            未實現損益：<span class="${unrealized>=0?'positive':'negative'}" style="font-family:var(--mono)">${fmtPnl(Math.round(unrealized))} ${cur}</span>
+            　已實現損益：<span class="${real>=0?'positive':'negative'}" style="font-family:var(--mono)">${fmtPnl(Math.round(real))} ${cur}</span>
+            　${rateNote}
+          </div>
+          ${rowsHtml}
+        </div>`;
+    });
+  });
+}
+const FOREIGN_REGIONS_JS = {USD:'美國', JPY:'日本'};
+
+async function promptForeignPrice(code) {
+  const price = prompt(`請輸入 ${code} 最新市價：`);
+  if (!price) return;
+  const res = await fetch(`${API}/api/foreign/prices/update`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({prices:[{security_code:code, price:parseFloat(price)}]})
+  });
+  if (res.ok) { toast('✅ 市價已更新', 'success'); loadForeignHoldings(); }
+  else { toast('❌ 更新失敗', 'error'); }
+}
+
+async function submitForeignEntry() {
+  const entity   = document.getElementById('fe-entity').value;
+  const currency = document.getElementById('fe-currency').value;
+  const side     = document.getElementById('fe-side').value;
+  const sharesRaw = parseFloat(document.getElementById('fe-shares').value);
+  if (!sharesRaw) { toast('❌ 請輸入股數', 'error'); return; }
+  const shares = side==='sell' ? -Math.abs(sharesRaw) : Math.abs(sharesRaw);
+  const gross  = parseFloat(document.getElementById('fe-gross').value) || 0;
+  const fee    = parseFloat(document.getElementById('fe-fee').value) || 0;
+  const tax    = parseFloat(document.getElementById('fe-tax').value) || 0;
+  const date   = document.getElementById('fe-date').value;
+  if (!date) { toast('❌ 請輸入交易日期', 'error'); return; }
+
+  const body = {
+    entity, currency, trade_date: date,
+    settle_date: document.getElementById('fe-settle').value || null,
+    security_code: document.getElementById('fe-code').value,
+    security_name: document.getElementById('fe-name').value,
+    shares, price: parseFloat(document.getElementById('fe-price').value) || null,
+    gross_amount: gross, fee, tax,
+    memo: document.getElementById('fe-memo').value || null,
+  };
+  const res = await fetch(`${API}/api/foreign/manual_entry`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    toast('✅ 海外交易已新增', 'success');
+    ['fe-code','fe-name','fe-shares','fe-price','fe-gross','fe-memo'].forEach(id => document.getElementById(id).value='');
+    document.getElementById('fe-fee').value = '0';
+    document.getElementById('fe-tax').value = '0';
+    setForeignMode('holdings');
+  } else {
+    const err = await res.json();
+    toast(`❌ ${err.error||'新增失敗'}`, 'error');
+  }
+}
+
+async function loadForeignHistory() {
+  const entity   = document.getElementById('fh-filter-entity').value;
+  const currency = document.getElementById('fh-filter-currency').value;
+  const params = new URLSearchParams();
+  if (entity)   params.set('entity', entity);
+  if (currency) params.set('currency', currency);
+  const res = await fetch(`${API}/api/foreign/transactions?${params}`);
+  const txns = await res.json();
+  const body = document.getElementById('foreign-history-body');
+  if (!txns.length) {
+    body.innerHTML = `<tr><td colspan="13" class="empty-state">尚無海外交易記錄</td></tr>`;
+    return;
+  }
+  body.innerHTML = txns.map(t => `
+    <tr>
+      <td class="left">${t.trade_date}</td>
+      <td class="left">${t.entity}</td>
+      <td class="left">${t.currency}</td>
+      <td class="left">${t.security_code||'—'}</td>
+      <td class="left">${t.security_name||'—'}</td>
+      <td>${fmt(t.shares)}</td>
+      <td>${t.price??'—'}</td>
+      <td>${fmt(Math.round(t.gross_amount))}</td>
+      <td>${fmt(t.fee)}</td>
+      <td>${fmt(t.tax)}</td>
+      <td>${fmt(Math.round(t.net_amount))}</td>
+      <td class="left">${t.memo||''}</td>
+      <td class="left"><button class="btn btn-ghost btn-sm" onclick="deleteForeignTransaction(${t.id})">🗑</button></td>
+    </tr>`).join('');
+}
+
+async function deleteForeignTransaction(id) {
+  if (!confirm('確定要刪除這筆海外交易嗎？刪除後會重新計算庫存。')) return;
+  const res = await fetch(`${API}/api/foreign/transactions/${id}`, { method:'DELETE' });
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadForeignHistory(); }
+  else { toast('❌ 刪除失敗', 'error'); }
 }
 </script>
 

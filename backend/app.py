@@ -15,8 +15,11 @@ from backend.models import (db, Transaction, Position, Security, UploadLog,
                             ACCOUNT_MAP, CASH_ACCOUNTS, CASH_ACCOUNT_BROKER_MAP,
                             FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
                             CashAccount, CashEntry, FundEntry, AuditLog,
-                            CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES)
-from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
+                            CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES,
+                            ForeignTransaction, ForeignPosition, ForeignUploadLog, FxRate,
+                            FOREIGN_ENTITIES, FOREIGN_CURRENCIES, FOREIGN_REGIONS)
+from backend.logic  import (recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl,
+                            recalculate_foreign_positions, calculate_foreign_realized_pnl, get_latest_fx_rate)
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
 
@@ -50,7 +53,9 @@ def create_app():
         db.create_all()
         _migrate_add_price_type()
         _migrate_add_stock_dividend_transaction_id()
+        _migrate_add_security_currency()
         _seed_securities()
+        _seed_foreign_securities()
         _seed_cash_accounts()
 
     # ── Serve frontend ───────────────────────────────────────────────────────
@@ -1934,6 +1939,196 @@ def create_app():
                '刪除股票股利（含已入集保記錄回滾）' if snap.get('allocated') else '刪除股票股利', snap)
         return jsonify({'status': 'ok'})
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 海外投資 (Foreign Investment) — 私RC / 私華強 Phase 1
+    # ══════════════════════════════════════════════════════════════════════
+
+    @app.route('/api/foreign/manual_entry', methods=['POST'])
+    def foreign_manual_entry():
+        """
+        Manually add a foreign (US/JP) trade for 私RC or 私華強.
+        Always available as a fallback even once PDF parsing is wired up.
+        Body: { entity, currency, trade_date, security_code, security_name,
+                shares, price, gross_amount, fee, tax, net_amount, memo }
+        JP security codes should be sent WITHOUT '.JP' suffix from the
+        frontend (e.g. '8002') — this route appends it automatically.
+        """
+        data = request.get_json()
+        entity   = data.get('entity')
+        currency = data.get('currency')
+        if entity not in FOREIGN_ENTITIES:
+            return jsonify({'error': f'entity 必須是 {FOREIGN_ENTITIES} 之一'}), 400
+        if currency not in FOREIGN_CURRENCIES:
+            return jsonify({'error': f'currency 必須是 {FOREIGN_CURRENCIES} 之一'}), 400
+
+        raw_code = (data.get('security_code') or '').strip().upper()
+        code = f'{raw_code}.JP' if (currency == 'JPY' and raw_code and not raw_code.endswith('.JP')) else raw_code
+        name = (data.get('security_name') or '').strip()
+
+        if code:
+            sec = Security.query.get(code)
+            if not sec:
+                db.session.add(Security(code=code, name=name or code,
+                                        region=('JP' if currency == 'JPY' else 'US'),
+                                        currency=currency))
+            elif name and sec.name != name:
+                sec.name = name
+
+        try:
+            trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({'error': 'trade_date 格式錯誤，需為 YYYY-MM-DD'}), 400
+        settle_date = None
+        if data.get('settle_date'):
+            settle_date = datetime.strptime(data['settle_date'], '%Y-%m-%d').date()
+
+        shares       = float(data.get('shares') or 0)
+        gross_amount = float(data.get('gross_amount') or 0)
+        fee          = float(data.get('fee') or 0)
+        tax          = float(data.get('tax') or 0)
+        net_amount   = data.get('net_amount')
+        net_amount   = float(net_amount) if net_amount not in (None, '') else (
+            gross_amount + fee + tax if shares > 0 else gross_amount - fee - tax
+        )
+
+        txn = ForeignTransaction(
+            trade_date=trade_date, settle_date=settle_date, entity=entity, currency=currency,
+            security_code=code or None, security_name=name or None,
+            shares=shares, price=data.get('price'), gross_amount=gross_amount,
+            fee=fee, tax=tax, net_amount=net_amount, memo=data.get('memo'),
+            source_file='manual',
+        )
+        db.session.add(txn)
+        db.session.commit()
+
+        recalculate_foreign_positions(entity, currency)
+        db.session.commit()
+
+        _audit('create', 'foreign_transactions', txn.id, f'手動新增海外交易 {entity}/{currency} {code}')
+        db.session.commit()
+
+        return jsonify({'status': 'ok', 'transaction': txn.to_dict()})
+
+    @app.route('/api/foreign/transactions', methods=['GET'])
+    def get_foreign_transactions():
+        entity   = request.args.get('entity')
+        currency = request.args.get('currency')
+        q = ForeignTransaction.query
+        if entity:
+            q = q.filter_by(entity=entity)
+        if currency:
+            q = q.filter_by(currency=currency)
+        txns = q.order_by(ForeignTransaction.trade_date.desc(), ForeignTransaction.id.desc()).all()
+        return jsonify([t.to_dict() for t in txns])
+
+    @app.route('/api/foreign/transactions/<int:txn_id>', methods=['DELETE'])
+    def delete_foreign_transaction(txn_id):
+        txn = ForeignTransaction.query.get_or_404(txn_id)
+        entity, currency = txn.entity, txn.currency
+        snap = txn.to_dict()
+        db.session.delete(txn)
+        db.session.commit()
+        recalculate_foreign_positions(entity, currency)
+        db.session.commit()
+        _audit('delete', 'foreign_transactions', txn_id, f'刪除海外交易 {entity}/{currency}', snap)
+        db.session.commit()
+        return jsonify({'status': 'ok'})
+
+    @app.route('/api/foreign/transactions/<int:txn_id>', methods=['PUT'])
+    def update_foreign_transaction(txn_id):
+        txn = ForeignTransaction.query.get_or_404(txn_id)
+        data = request.get_json()
+        snap = txn.to_dict()
+        for field in ['security_code', 'security_name', 'price', 'gross_amount',
+                      'fee', 'tax', 'net_amount', 'memo']:
+            if field in data:
+                setattr(txn, field, data[field])
+        if 'shares' in data:
+            txn.shares = float(data['shares'])
+        if 'trade_date' in data:
+            txn.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
+        db.session.commit()
+        recalculate_foreign_positions(txn.entity, txn.currency)
+        db.session.commit()
+        _audit('edit', 'foreign_transactions', txn_id, f'編輯海外交易 {txn.entity}/{txn.currency}', snap)
+        db.session.commit()
+        return jsonify({'status': 'ok', 'transaction': txn.to_dict()})
+
+    @app.route('/api/foreign/positions', methods=['GET'])
+    def get_foreign_positions():
+        """庫存總表(美日) data — positions for 私RC/私華強, grouped by currency."""
+        entity   = request.args.get('entity')
+        currency = request.args.get('currency')
+        q = ForeignPosition.query.filter(ForeignPosition.shares > 0)
+        if entity:
+            q = q.filter_by(entity=entity)
+        if currency:
+            q = q.filter_by(currency=currency)
+        positions = q.all()
+        realized  = calculate_foreign_realized_pnl()
+        return jsonify({
+            'positions': [p.to_dict() for p in positions],
+            'realized_pnl': {f'{ent}_{cur}': val for (ent, cur), val in realized.items()},
+            'fx_rates': {cur: get_latest_fx_rate(cur) for cur in FOREIGN_CURRENCIES},
+        })
+
+    @app.route('/api/foreign/realized_pnl', methods=['GET'])
+    def get_foreign_realized_pnl():
+        realized = calculate_foreign_realized_pnl()
+        return jsonify({f'{ent}_{cur}': val for (ent, cur), val in realized.items()})
+
+    @app.route('/api/foreign/prices/update', methods=['POST'])
+    def update_foreign_prices():
+        """Manually-entered prices only for Phase 1 (no live US/JP feed wired up yet)."""
+        data = request.get_json() or {}
+        updates = data.get('prices', [])  # [{security_code, price}]
+        updated = []
+        for u in updates:
+            code = u.get('security_code')
+            price = u.get('price')
+            if not code or price is None:
+                continue
+            for pos in ForeignPosition.query.filter_by(security_code=code).all():
+                pos.last_price = float(price)
+                pos.price_date = date.today()
+                updated.append(code)
+        db.session.commit()
+        return jsonify({'status': 'ok', 'updated': updated})
+
+    @app.route('/api/foreign/securities', methods=['GET'])
+    def get_foreign_securities():
+        currency = request.args.get('currency')
+        q = Security.query.filter(Security.currency.in_(FOREIGN_CURRENCIES))
+        if currency:
+            q = q.filter_by(currency=currency)
+        return jsonify([s.to_dict() for s in q.order_by(Security.code).all()])
+
+    # ── FX rates (separate tab, per Bryan's request) ───────────────────────
+    @app.route('/api/fx_rates', methods=['GET'])
+    def get_fx_rates():
+        currency = request.args.get('currency')
+        q = FxRate.query
+        if currency:
+            q = q.filter_by(currency=currency)
+        rates = q.order_by(FxRate.rate_date.desc()).limit(100).all()
+        return jsonify([r.to_dict() for r in rates])
+
+    @app.route('/api/fx_rates', methods=['POST'])
+    def add_fx_rate():
+        data = request.get_json()
+        currency = data.get('currency')
+        if currency not in FOREIGN_CURRENCIES:
+            return jsonify({'error': f'currency 必須是 {FOREIGN_CURRENCIES} 之一'}), 400
+        rate_date = datetime.strptime(data['rate_date'], '%Y-%m-%d').date()
+        existing = FxRate.query.filter_by(currency=currency, rate_date=rate_date).first()
+        if existing:
+            existing.rate = float(data['rate'])
+        else:
+            db.session.add(FxRate(currency=currency, rate_date=rate_date,
+                                  rate=float(data['rate']), source='manual'))
+        db.session.commit()
+        return jsonify({'status': 'ok'})
+
     # ── Audit log ────────────────────────────────────────────────────────────
     @app.route('/api/audit_log', methods=['GET'])
     def get_audit_log():
@@ -1986,6 +2181,17 @@ def _migrate_add_stock_dividend_transaction_id():
         db.session.rollback()
 
 
+def _migrate_add_security_currency():
+    """Add currency column to securities table if it doesn't exist yet (for foreign module)."""
+    try:
+        db.session.execute(db.text(
+            "ALTER TABLE securities ADD COLUMN IF NOT EXISTS currency VARCHAR(5) DEFAULT 'TWD'"
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def _seed_securities():
     """Pre-populate known securities from the Excel data"""
     known = {
@@ -2006,6 +2212,54 @@ def _seed_securities():
     for code, name in known.items():
         if not Security.query.get(code):
             db.session.add(Security(code=code, name=name))
+    db.session.commit()
+
+
+def _seed_foreign_securities():
+    """
+    Pre-populate known US/JP securities from Sophie's 證券名稱USD/JPY sheets.
+    JP codes are suffixed '.JP' (e.g. '8002.JP') to avoid colliding with
+    TW security codes, matching the convention Sophie already uses in the
+    地區 column. BMNR name corrected from '台幣換美金' (data-entry mistake)
+    to '以太坊儲備企業'.
+    """
+    usd_known = {
+        'AAOI': 'Applied Optoelectronics', 'AAPL': '蘋果', 'ALAB': 'Astera Labs Inc',
+        'APP': 'Applovin Corp.開發者行銷和營利平台供應商', 'ARGT': '阿根廷ETF',
+        'ARKF': 'ARK金融科技創新主動型ETF', 'ARKX': 'ARK Space Exploration',
+        'ASML': 'ASML Holdings NV', 'BAND': 'Bandwidth Inc', 'BE': 'Bloom Energy Corporation',
+        'BMNR': '以太坊儲備企業', 'BRK/B': '波克夏B', 'CDE': 'Coeur Mining Inc',
+        'COIN': 'Coinbase', 'CRDO': '克里多科技', 'CRM': '賽富時Salesforce',
+        'CRWD': 'Crowd Strike', 'DRAM': 'Roundhill Memory ETF', 'DUOL': 'Duolingo Inc',
+        'GEV': 'GE Vernoval Inc', 'GOOG': '谷歌字母', 'HACK': 'Amplify網路安全ETF',
+        'IGV': 'iShares拓展科技軟體', 'INTC': '英特爾', 'IONQ': 'IonQ 純量子計算公司',
+        'ISRG': '直覺外科', 'IWM': 'ishares Russell 2000', 'KBWB': 'Ivesco KBW Bank ETF',
+        'LEU': 'Centrus Energy 核電原料廠商', 'LITE': 'Lumenten Holdings', 'MRVL': 'Marvell',
+        'MSFT': '微軟', 'MU': '美光', 'NBIS': 'Nebius Group人工智慧', 'NET': 'Cloudflare 網路安全',
+        'NLR': '鈾與核能ETF', 'NVDA': '輝達', 'OKLO': 'OKLO先進核能', 'PSN': 'Parsons Corp',
+        'PSQ': 'ProShares放空型納斯達克指數ETF', 'QQQ': '納斯達克100指數ETF', 'QTUM': '量子ETF',
+        'RBRK': 'Rubrik 數據安全公司', 'RDDT': 'Rddit社群媒體公司', 'RGTI': 'Rigetti 超導量子',
+        'RKLB': 'Rocket太空', 'SLV': 'iShart Silver Trust', 'SOXX': 'iShares Semiconductor ETF',
+        'TSM': '台積電ADR', 'UFO': 'Producer Space ETF',
+    }
+    jpy_known = {
+        '1615': 'NEXT FUNDS TOPIX Banks', '1629': 'NEXT FUNDS TOPIX17', '4704': 'Trend Micro',
+        '8001': 'ITOCHU Corp', '8002': 'Marubeni', '8053': 'Sumitomo', '8306': 'MUFG',
+        '8316': 'SMFG', '8411': 'Mizuho', '9433': 'KDDI',
+    }
+    for code, name in usd_known.items():
+        if not Security.query.get(code):
+            db.session.add(Security(code=code, name=name, region='US', currency='USD'))
+        else:
+            sec = Security.query.get(code)
+            if not sec.currency or sec.currency == 'TWD':
+                sec.currency = 'USD'
+            if code == 'BMNR':
+                sec.name = '以太坊儲備企業'
+    for code, name in jpy_known.items():
+        jp_code = f'{code}.JP'
+        if not Security.query.get(jp_code):
+            db.session.add(Security(code=jp_code, name=name, region='JP', currency='JPY'))
     db.session.commit()
 
 
