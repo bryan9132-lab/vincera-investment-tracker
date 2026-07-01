@@ -200,7 +200,6 @@ def calculate_realized_pnl(entity: str = None):
       - Deposited CashDividend records (配息 already marked 已入帳)
     Returns dict: {entity: realized_pnl}
     """
-    from .models import Transaction, ACCOUNT_MAP, CashDividend
     entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
     result = {}
 
