@@ -194,13 +194,18 @@ def update_all_prices():
 def calculate_realized_pnl(entity: str = None):
     """
     Calculate realized P&L for each entity by replaying transaction history.
+    Includes:
+      - Stock sell gains/losses (weighted average cost)
+      - Non-stock PNL transactions (貨幣基金收益, memo='非股票損益')
+      - Deposited CashDividend records (配息 already marked 已入帳)
     Returns dict: {entity: realized_pnl}
     """
-    from .models import Transaction, ACCOUNT_MAP
+    from .models import Transaction, ACCOUNT_MAP, CashDividend
     entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
     result = {}
 
     for ent in entities:
+        # ── 1. Stock sell P&L (weighted average cost) ────────────────────────
         txns = (Transaction.query
                 .filter_by(entity=ent)
                 .filter(Transaction.security_code.isnot(None))
@@ -229,7 +234,19 @@ def calculate_realized_pnl(entity: str = None):
                         holdings[code]['shares']     = 0
                         holdings[code]['total_cost'] = 0
 
-        result[ent] = round(realized, 0)
+        # ── 2. Non-stock PNL transactions (貨幣基金收益 etc.) ─────────────────
+        misc_total = (db.session.query(db.func.sum(Transaction.net_amount))
+                      .filter_by(entity=ent)
+                      .filter(Transaction.security_code.is_(None))
+                      .filter(Transaction.memo == '非股票損益')
+                      .scalar()) or 0.0
+
+        # ── 3. Deposited cash dividends (配息 marked 已入帳) ─────────────────
+        div_total = (db.session.query(db.func.sum(CashDividend.total_amount))
+                     .filter_by(entity=ent, deposited=True)
+                     .scalar()) or 0.0
+
+        result[ent] = round(realized + misc_total + div_total, 0)
 
     return result
 
@@ -328,125 +345,38 @@ def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: st
                 'note':            '待入帳' if not cd.deposited else None,
             })
 
+    # ── 貨幣基金 (non-stock PNL transactions imported from ledger) ─────────────
+    if category in (None, '', '貨幣基金'):
+        q = (Transaction.query
+             .filter(Transaction.security_code.is_(None))
+             .filter(Transaction.memo == '非股票損益'))
+        if entity:
+            q = q.filter_by(entity=entity)
+        if broker:
+            q = q.filter_by(broker=broker)
+        for t in q.order_by(Transaction.trade_date).all():
+            rows.append({
+                'date':            t.trade_date.isoformat() if t.trade_date else None,
+                'entity':          t.entity,
+                'broker':          t.broker,
+                'category':        '貨幣基金',
+                'security_code':   None,
+                'security_name':   t.security_name or '貨幣基金收益',
+                'shares':          None,
+                'price':           None,
+                'gross_amount':    t.net_amount,
+                'fee':             None,
+                'tax':             None,
+                'net_amount':      t.net_amount,
+                'avg_cost':        None,
+                'cost_basis':      None,
+                'realized_pnl':    t.net_amount,
+                'note':            None,
+            })
+
     # ── 貨幣基金 (申購/贖回利息) — not yet modeled as its own entry type ──
     # Placeholder: returns nothing for this category until a dedicated
     # CASH_ENTRY_TYPES entry (e.g. '基金獲利') exists to source this from.
 
     rows.sort(key=lambda r: r['date'] or '')
     return rows
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Foreign (海外) investment logic — 私RC / 私華強 (Phase 1)
-#
-# Mirrors recalculate_positions / calculate_realized_pnl but scoped to
-# ForeignTransaction/ForeignPosition, segregated by (entity, currency).
-# Uses round(..., 6) during replay (not raw float subtraction) to avoid the
-# 1.8e-12 floating-point residue seen in Sophie's 證券名稱USD sheet.
-# ══════════════════════════════════════════════════════════════════════════════
-
-def recalculate_foreign_positions(entity: str = None, currency: str = None):
-    from .models import ForeignTransaction, ForeignPosition, FOREIGN_ENTITIES, FOREIGN_CURRENCIES
-
-    entities   = [entity] if entity else FOREIGN_ENTITIES
-    currencies = [currency] if currency else FOREIGN_CURRENCIES
-
-    for ent in entities:
-        for cur in currencies:
-            txns = (ForeignTransaction.query
-                    .filter_by(entity=ent, currency=cur)
-                    .filter(ForeignTransaction.security_code.isnot(None))
-                    .filter(ForeignTransaction.shares != 0)
-                    .order_by(ForeignTransaction.trade_date, ForeignTransaction.id)
-                    .all())
-
-            holdings = {}
-            for txn in txns:
-                code = txn.security_code
-                if code not in holdings:
-                    holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
-                if txn.shares > 0:
-                    holdings[code]['shares']     = round(holdings[code]['shares'] + txn.shares, 6)
-                    holdings[code]['total_cost'] = round(holdings[code]['total_cost'] + txn.gross_amount + txn.fee, 6)
-                else:
-                    if holdings[code]['shares'] > 0:
-                        sell_qty = abs(txn.shares)
-                        avg      = holdings[code]['total_cost'] / holdings[code]['shares']
-                        holdings[code]['shares']     = round(holdings[code]['shares'] - sell_qty, 6)
-                        holdings[code]['total_cost'] = round(holdings[code]['total_cost'] - avg * sell_qty, 6)
-                        if holdings[code]['shares'] < 0.001:
-                            holdings[code]['shares']     = 0
-                            holdings[code]['total_cost'] = 0
-
-            for code, data in holdings.items():
-                shares = data['shares']
-                cost   = data['total_cost']
-                # Clean up floating-point residue (e.g. -1.8e-12) instead of
-                # carrying it forward like the old Excel did.
-                if abs(shares) < 1e-6:
-                    shares = 0
-                if abs(cost) < 1e-6:
-                    cost = 0
-                pos = ForeignPosition.query.filter_by(entity=ent, currency=cur, security_code=code).first()
-                if pos is None:
-                    pos = ForeignPosition(entity=ent, currency=cur, security_code=code)
-                    db.session.add(pos)
-                pos.shares     = round(shares, 4)
-                pos.total_cost = round(cost, 4)
-                pos.avg_cost   = round(cost / shares, 4) if shares > 0 else 0
-
-            for zp in (ForeignPosition.query.filter_by(entity=ent, currency=cur)
-                       .filter(ForeignPosition.shares <= 0).all()):
-                db.session.delete(zp)
-
-    db.session.commit()
-
-
-def calculate_foreign_realized_pnl(entity: str = None, currency: str = None):
-    """Returns dict: {(entity, currency): realized_pnl}"""
-    from .models import ForeignTransaction, FOREIGN_ENTITIES, FOREIGN_CURRENCIES
-
-    entities   = [entity] if entity else FOREIGN_ENTITIES
-    currencies = [currency] if currency else FOREIGN_CURRENCIES
-    result = {}
-
-    for ent in entities:
-        for cur in currencies:
-            txns = (ForeignTransaction.query
-                    .filter_by(entity=ent, currency=cur)
-                    .filter(ForeignTransaction.security_code.isnot(None))
-                    .order_by(ForeignTransaction.trade_date, ForeignTransaction.id)
-                    .all())
-
-            holdings = {}
-            realized = 0.0
-            for t in txns:
-                code = t.security_code
-                if code not in holdings:
-                    holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
-                if t.shares > 0:
-                    holdings[code]['shares']     = round(holdings[code]['shares'] + t.shares, 6)
-                    holdings[code]['total_cost'] = round(holdings[code]['total_cost'] + t.gross_amount + t.fee, 6)
-                else:
-                    if holdings[code]['shares'] > 0:
-                        sell_qty   = abs(t.shares)
-                        avg_cost   = holdings[code]['total_cost'] / holdings[code]['shares']
-                        cost_basis = avg_cost * sell_qty
-                        realized  += t.net_amount - cost_basis
-                        holdings[code]['shares']     = round(holdings[code]['shares'] - sell_qty, 6)
-                        holdings[code]['total_cost'] = round(holdings[code]['total_cost'] - avg_cost * sell_qty, 6)
-                        if holdings[code]['shares'] < 0.001:
-                            holdings[code]['shares']     = 0
-                            holdings[code]['total_cost'] = 0
-
-            result[(ent, cur)] = round(realized, 0)
-
-    return result
-
-
-def get_latest_fx_rate(currency: str):
-    """Latest manually-entered or auto-fetched FX rate (1 unit currency = N TWD)."""
-    from .models import FxRate
-    row = (FxRate.query.filter_by(currency=currency)
-           .order_by(FxRate.rate_date.desc()).first())
-    return row.rate if row else None
