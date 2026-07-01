@@ -379,3 +379,103 @@ def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: st
 
     rows.sort(key=lambda r: r['date'] or '')
     return rows
+
+
+# ── Foreign investment stubs ──────────────────────────────────────────────────
+# These functions support the 海外投資 module in app.py.
+# Defined here to satisfy imports; full implementation lives in app.py routes.
+
+def recalculate_foreign_positions(entity: str = None):
+    """Recalculate foreign stock positions from ForeignTransaction history."""
+    from .models import db, ForeignTransaction, ForeignPosition
+    entities = [entity] if entity else ['私銀RC', '私銀華強', 'Renowned', 'KGI']
+    for ent in entities:
+        try:
+            txns = (ForeignTransaction.query
+                    .filter_by(entity=ent)
+                    .filter(ForeignTransaction.security_code.isnot(None))
+                    .order_by(ForeignTransaction.trade_date)
+                    .all())
+            holdings = {}
+            for t in txns:
+                code = t.security_code
+                if code not in holdings:
+                    holdings[code] = {'shares': 0.0, 'total_cost_usd': 0.0}
+                if t.shares > 0:
+                    holdings[code]['shares']         += t.shares
+                    holdings[code]['total_cost_usd'] += t.cost_usd or 0
+                else:
+                    if holdings[code]['shares'] > 0:
+                        sell_qty = abs(t.shares)
+                        avg      = holdings[code]['total_cost_usd'] / holdings[code]['shares']
+                        holdings[code]['shares']         -= sell_qty
+                        holdings[code]['total_cost_usd'] -= avg * sell_qty
+                        if holdings[code]['shares'] < 0.001:
+                            holdings[code]['shares']         = 0
+                            holdings[code]['total_cost_usd'] = 0
+            for code, data in holdings.items():
+                if data['shares'] < 0.001:
+                    continue
+                pos = ForeignPosition.query.filter_by(entity=ent, security_code=code).first()
+                if pos is None:
+                    pos = ForeignPosition(entity=ent, security_code=code)
+                    db.session.add(pos)
+                pos.shares         = round(data['shares'], 4)
+                pos.total_cost_usd = round(data['total_cost_usd'], 4)
+                pos.avg_cost_usd   = round(data['total_cost_usd'] / data['shares'], 4) if data['shares'] > 0 else 0
+            for zp in ForeignPosition.query.filter_by(entity=ent).filter(ForeignPosition.shares <= 0).all():
+                db.session.delete(zp)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
+def calculate_foreign_realized_pnl(entity: str = None):
+    """Calculate realized P&L for foreign investments."""
+    from .models import ForeignTransaction, ACCOUNT_MAP
+    entities = [entity] if entity else ['私銀RC', '私銀華強', 'Renowned', 'KGI']
+    result = {}
+    for ent in entities:
+        try:
+            txns = (ForeignTransaction.query
+                    .filter_by(entity=ent)
+                    .filter(ForeignTransaction.security_code.isnot(None))
+                    .order_by(ForeignTransaction.trade_date)
+                    .all())
+            holdings = {}
+            realized = 0.0
+            for t in txns:
+                code = t.security_code
+                if code not in holdings:
+                    holdings[code] = {'shares': 0.0, 'total_cost_usd': 0.0}
+                if t.shares > 0:
+                    holdings[code]['shares']         += t.shares
+                    holdings[code]['total_cost_usd'] += t.cost_usd or 0
+                else:
+                    if holdings[code]['shares'] > 0:
+                        sell_qty   = abs(t.shares)
+                        avg        = holdings[code]['total_cost_usd'] / holdings[code]['shares']
+                        cost_basis = avg * sell_qty
+                        realized  += (t.proceeds_usd or 0) - cost_basis
+                        holdings[code]['shares']         -= sell_qty
+                        holdings[code]['total_cost_usd'] -= avg * sell_qty
+                        if holdings[code]['shares'] < 0.001:
+                            holdings[code]['shares']         = 0
+                            holdings[code]['total_cost_usd'] = 0
+            result[ent] = round(realized, 2)
+        except Exception:
+            result[ent] = 0.0
+    return result
+
+
+def get_latest_fx_rate(currency: str = 'USD') -> float:
+    """Return the latest FX rate for a given currency vs TWD."""
+    from .models import FxRate
+    try:
+        rate = (FxRate.query
+                .filter_by(currency=currency)
+                .order_by(FxRate.rate_date.desc())
+                .first())
+        return rate.rate if rate else 30.0
+    except Exception:
+        return 30.0
