@@ -909,6 +909,16 @@ function renderHoldings(data, realized, byBroker) {
                  ⏳ 待入集保 ${zhang}張（預計 ${dateStr} 入集保，屆時才可賣出）
                </div>`;
       }).join('');
+
+      // If there are pending (未入集保) bonus shares, show the projected avg cost
+      // after they land — shares increase but cost stays same, so avg cost drops.
+      const pendingBonus = pending.reduce((s, pd) => s + (pd.bonus_shares || 0), 0);
+      const displayAvgCost = (pendingBonus > 0 && p.shares > 0 && p.total_cost)
+        ? (p.total_cost / (p.shares + pendingBonus))
+        : p.avg_cost;
+      const avgCostLabel = pendingBonus > 0
+        ? `@ ${displayAvgCost?.toFixed(2) ?? '—'} <span style="font-size:10px;color:var(--muted)">(含待配)</span>`
+        : `@ ${p.avg_cost?.toFixed(2) ?? '—'}`;
       return `<div class="stock-row">
         <div class="stock-row-left">
           <div class="stock-row-code">${p.security_code}</div>
@@ -924,7 +934,7 @@ function renderHoldings(data, realized, byBroker) {
         </div>
         <div class="stock-row-right">
           <div class="stock-shares">${+(p.shares/1000).toFixed(3).replace(/\.?0+$/, '')} 張</div>
-          <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
+          <div class="stock-cost">${avgCostLabel}</div>
           <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
           <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
             ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'}
