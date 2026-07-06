@@ -47,7 +47,7 @@ def generate_excel() -> str:
 
     # ── Column widths ────────────────────────────────────────────────────────
     col_w = {
-        'A': 13, 'B': 21, 'C': 24, 'D': 14,
+        'A': 13, 'B': 21, 'C': 24, 'D': 20,
         'E': 10, 'F': 14, 'G': 24,
         'H': 10, 'I': 14, 'J': 24,
         'K': 17, 'L': 16,
@@ -259,7 +259,7 @@ def generate_excel() -> str:
         for col_i, val in enumerate([rc, hq], 3):
             clr = 'C00000' if val < 0 else '000000'
             c = ws.cell(r, col_i, round(val))
-            c.font          = Font(name='微軟正黑體', size=20, bold=(label=='合計'), color=clr)
+            c.font          = Font(name='微軟正黑體', size=16, bold=(label=='合計'), color=clr)
             c.alignment     = Alignment(horizontal='right', vertical='center')
             c.number_format = '#,##0'
             c.border        = _thin_border()
