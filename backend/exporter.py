@@ -18,6 +18,19 @@ def _thin_border():
     return Border(left=t, right=t, top=t, bottom=t)
 
 
+def _apply_range_border(ws, min_row, min_col, max_row, max_col):
+    """Apply thin outer border to every edge cell of a merged or plain range."""
+    t = Side(style='thin', color='000000')
+    for r in range(min_row, max_row + 1):
+        for c in range(min_col, max_col + 1):
+            cell = ws.cell(r, c)
+            left   = t if c == min_col else None
+            right  = t if c == max_col else None
+            top    = t if r == min_row else None
+            bottom = t if r == max_row else None
+            cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+
+
 def _cell(ws, row, col, value=None, font_size=20, bold=False,
           align='center', valign='center', wrap=False,
           num_fmt=None, color='000000', border=False):
@@ -86,7 +99,7 @@ def generate_excel() -> str:
     ws.merge_cells('A2:L2')
     _cell(ws, 2, 1, '\n'.join(summary_lines), font_size=16, bold=False,
           align='left', valign='top', wrap=True)
-    ws.row_dimensions[2].height = max(36, 22 * len(summary_lines))
+    ws.row_dimensions[2].height = max(74.25, 22 * len(summary_lines))
 
     # ── Row 3-4: Group headers ───────────────────────────────────────────────
     for col in ['A', 'B', 'C', 'D']:
@@ -101,7 +114,7 @@ def generate_excel() -> str:
         sc.font      = Font(name='微軟正黑體', size=16, bold=True)
         sc.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         sc.border    = _thin_border()
-    ws.row_dimensions[3].height = 36
+    ws.row_dimensions[3].height = 36  # locked
 
     sub_headers = {5:'張數', 6:'成本', 7:'金額', 8:'張數', 9:'成本', 10:'金額', 11:'RC', 12:'華強'}
     for col_i, label in sub_headers.items():
@@ -109,7 +122,7 @@ def generate_excel() -> str:
         c.font      = Font(name='微軟正黑體', size=16, bold=True)
         c.alignment = Alignment(horizontal='center', vertical='center')
         c.border    = _thin_border()
-    ws.row_dimensions[4].height = 51
+    ws.row_dimensions[4].height = 51  # locked
 
     # ── Data rows — merge RC+私銀RC, 華強+私銀華強 ──────────────────────────────
     positions = Position.query.filter(Position.shares > 0).all()
@@ -142,7 +155,7 @@ def generate_excel() -> str:
     totals  = {e: 0 for e in DISPLAY_ENTITIES}
     tot_pnl = {e: 0 for e in DISPLAY_ENTITIES}
 
-    ROW_HEIGHTS = [67.5, 76.5, 69.75, 81.75, 84.0, 67.5]
+    ROW_HEIGHTS = [67.5, 76.5, 69.75, 81.75, 84.0, 67.5]  # per-stock row heights
 
     for idx, (code, data) in enumerate(sorted(by_code.items())):
         price  = data['price']
@@ -203,8 +216,9 @@ def generate_excel() -> str:
         c.alignment     = Alignment(horizontal='right', vertical='center')
         c.number_format = '#,##0'
         c.border        = _thin_border()
-    ws.row_dimensions[row].height = 51
+    ws.row_dimensions[row].height = 51  # 小計 row
     row += 2
+    ws.row_dimensions[row-1].height = 15.75  # blank spacer row 7
 
     # ── 損益 + 資金餘額 side-by-side ────────────────────────────────────────
     rRC  = realized.get('RC', 0)   + realized.get('私銀RC', 0)
@@ -230,32 +244,32 @@ def generate_excel() -> str:
     pnl_start = row
 
     # ── LEFT: 損益 (cols A-D, rows pnl_start to pnl_start+4) ────────────────
-    # Row 0: header — '損益' spans 2 rows, '合計' header
     ws.merge_cells(start_row=pnl_start, start_column=1, end_row=pnl_start+1, end_column=2)
-    _cell(ws, pnl_start, 1, '損益', font_size=16, bold=True, align='center', border=True)
+    _cell(ws, pnl_start, 1, '損益', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 1, pnl_start+1, 2)
     ws.merge_cells(start_row=pnl_start, start_column=3, end_row=pnl_start, end_column=4)
-    _cell(ws, pnl_start, 3, '合計', font_size=16, bold=True, align='center', border=True)
-    ws.row_dimensions[pnl_start].height = 59
+    _cell(ws, pnl_start, 3, '合計', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 3, pnl_start, 4)
+    ws.row_dimensions[pnl_start].height = 59.25
 
-    # Row 1: sub-headers RC / 華強
     for col_i, lbl in [(3,'RC'), (4,'華強')]:
         c2 = ws.cell(pnl_start+1, col_i, lbl)
         c2.font      = Font(name='微軟正黑體', size=16, bold=True)
         c2.alignment = Alignment(horizontal='center', vertical='center')
         c2.border    = _thin_border()
-    ws.row_dimensions[pnl_start+1].height = 67
+    ws.row_dimensions[pnl_start+1].height = 67.5
 
-    # Rows 2-4: 已實現/未實現/合計
     pnl_data = [
         ('已實現損益', rRC, rHQ),
         ('未實現損益', uRC, uHQ),
         ('合計', rRC+uRC, rHQ+uHQ),
     ]
-    pnl_row_heights = [77, 69, 55]
+    pnl_row_heights = [77.25, 69, 55.5]
     for i, (label, rc, hq) in enumerate(pnl_data):
         r = pnl_start + 2 + i
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-        _cell(ws, r, 1, label, font_size=16, bold=True, align='left', border=True)
+        _cell(ws, r, 1, label, font_size=16, bold=True, align='left')
+        _apply_range_border(ws, r, 1, r, 2)
         for col_i, val in enumerate([rc, hq], 3):
             clr = 'C00000' if val < 0 else '000000'
             c = ws.cell(r, col_i, round(val))
@@ -266,23 +280,24 @@ def generate_excel() -> str:
         ws.row_dimensions[r].height = pnl_row_heights[i]
 
     # ── RIGHT: 資金餘額 (cols F-I, rows pnl_start to pnl_start+2) ────────────
-    # Row 0: '賬戶' header (F:G) | '資金餘額' header (H:I)
     ws.merge_cells(start_row=pnl_start, start_column=6, end_row=pnl_start, end_column=7)
-    _cell(ws, pnl_start, 6, '賬戶', font_size=16, bold=True, align='center', border=True)
+    _cell(ws, pnl_start, 6, '賬戶', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 6, pnl_start, 7)
     ws.merge_cells(start_row=pnl_start, start_column=8, end_row=pnl_start, end_column=9)
-    _cell(ws, pnl_start, 8, '資金餘額', font_size=16, bold=True, align='center', border=True)
+    _cell(ws, pnl_start, 8, '資金餘額', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 8, pnl_start, 9)
 
-    # Rows 1-2: RC then 華強
     for i, (label, bal) in enumerate([('RC', rc_balance), ('華強', hq_balance)]):
         r = pnl_start + 1 + i
         ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=7)
-        _cell(ws, r, 6, label, font_size=16, bold=True, align='left', border=True)
+        _cell(ws, r, 6, label, font_size=16, bold=True, align='left')
+        _apply_range_border(ws, r, 6, r, 7)
         ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=9)
         c = ws.cell(r, 8, round(bal))
         c.font          = Font(name='微軟正黑體', size=20)
         c.alignment     = Alignment(horizontal='right', vertical='center')
         c.number_format = '#,##0'
-        c.border        = _thin_border()
+        _apply_range_border(ws, r, 8, r, 9)
 
     row = pnl_start + 5
 
