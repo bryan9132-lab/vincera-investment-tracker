@@ -16,10 +16,8 @@ from backend.models import (db, Transaction, Position, Security, UploadLog,
                             FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
                             CashAccount, CashEntry, FundEntry, AuditLog,
                             CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES,
-                            ForeignTransaction, ForeignPosition, ForeignUploadLog, FxRate,
-                            FOREIGN_ENTITIES, FOREIGN_CURRENCIES, FOREIGN_REGIONS)
-from backend.logic  import (recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl,
-                            recalculate_foreign_positions, calculate_foreign_realized_pnl, get_latest_fx_rate)
+                            CashCapitalIncrease)
+from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
 
@@ -52,10 +50,8 @@ def create_app():
     with app.app_context():
         db.create_all()
         _migrate_add_price_type()
-        _migrate_add_stock_dividend_transaction_id()
-        _migrate_add_security_currency()
+        _migrate_add_capital_increases_table()
         _seed_securities()
-        _seed_foreign_securities()
         _seed_cash_accounts()
 
     # ── Serve frontend ───────────────────────────────────────────────────────
@@ -191,6 +187,7 @@ def create_app():
                 tax            = t['tax'],
                 net_amount     = t['net_amount'],
                 source_file    = data.get('filename', ''),
+                memo           = t.get('memo') or None,
             )
             db.session.add(txn)
 
@@ -272,6 +269,21 @@ def create_app():
                             'bonus_shares': sd.bonus_shares,
                             'expected_allocate_date': sd.expected_allocate_date.isoformat() if sd.expected_allocate_date else None,
                         })
+
+        # Attach pending (not yet allocated) capital increases
+        pending_ci = CashCapitalIncrease.query.filter_by(allocated=False).all()
+        for ci in pending_ci:
+            pos_entity = _dividend_position_entity(ci.entity, ci.broker)
+            if pos_entity in result:
+                for p in result[pos_entity]:
+                    if p['security_code'] == ci.security_code:
+                        p.setdefault('pending_capital_increases', []).append({
+                            'id': ci.id,
+                            'shares': ci.shares,
+                            'price_per_share': ci.price_per_share,
+                            'expected_allocate_date': ci.expected_allocate_date.isoformat() if ci.expected_allocate_date else None,
+                            'note': ci.note,
+                        })
         return jsonify(result)
 
 
@@ -281,18 +293,6 @@ def create_app():
         """Calculate realized P&L for all entities"""
         result = calculate_realized_pnl()
         return jsonify(result)
-
-    @app.route('/api/realized_pnl_ledger', methods=['GET'])
-    def get_realized_pnl_ledger_route():
-        """Full audit-trail ledger behind 已實現損益 — read-only.
-        Optional filters: entity, broker, category (股票買賣/貨幣基金/現金股利)"""
-        from .logic import get_realized_pnl_ledger
-        rows = get_realized_pnl_ledger(
-            entity=request.args.get('entity') or None,
-            broker=request.args.get('broker') or None,
-            category=request.args.get('category') or None,
-        )
-        return jsonify(rows)
 
     # ── Update market prices ─────────────────────────────────────────────────
     @app.route('/api/prices/update', methods=['POST'])
@@ -372,9 +372,15 @@ def create_app():
             gross  = abs(shares) * price
             FEE_RATES = {'統一': 0.00036477, '元大': 0.000625, '國泰': 0.00042465}
             fee_rate = FEE_RATES.get(mapping['broker'], 0.001425)
-            fee    = round(gross * fee_rate)  # 小數點四捨五入
-            tax    = round(gross * 0.003) if shares < 0 else 0
-            net    = gross - fee - tax
+            auto_fee = round(gross * fee_rate)
+            auto_tax = round(gross * 0.003) if shares < 0 else 0
+            # Use user-provided fee/tax if given; fall back to auto-calculated
+            actual_fee = int(t['fee']) if t.get('fee') not in (None, '') else auto_fee
+            actual_tax = int(t['tax']) if t.get('tax') not in (None, '') else auto_tax
+            # net uses the ACTUAL (user-provided) fee/tax, not auto values
+            is_buy = shares > 0
+            net    = gross - actual_fee - actual_tax if not is_buy else gross - actual_fee
+            memo   = str(t.get('memo', '')).strip() or None
 
             trades_preview.append({
                 'security_code':  code,
@@ -383,9 +389,10 @@ def create_app():
                 'shares':         shares,
                 'price':          price,
                 'gross_amount':   round(gross),
-                'fee':            int(t.get('fee', fee)),
-                'tax':            int(t.get('tax', tax)),
+                'fee':            actual_fee,
+                'tax':            actual_tax,
                 'net_amount':     round(net),
+                'memo':           memo,
             })
 
         return jsonify({
@@ -761,8 +768,8 @@ def create_app():
                 return jsonify({'error': '其他收入請填正數金額'}), 400
 
         elif entry_type == '其他支出':
-            if amount <= 0:
-                return jsonify({'error': '其他支出請填正數金額'}), 400
+            if amount >= 0:
+                return jsonify({'error': '其他支出請填負數金額'}), 400
 
         elif entry_type == '轉出賬戶':
             target_id = data.get('target_account_id', '').strip()
@@ -799,11 +806,6 @@ def create_app():
                 return jsonify({'error': '貸款功能只限私銀帳戶'}), 400
 
         try:
-            # Sophie now enters 其他支出 as a positive number; we record it as
-            # an outflow internally so account balances still decrease correctly.
-            if entry_type == '其他支出':
-                amount = -abs(amount)
-
             if entry_type in ('轉出賬戶', '股東往來（借）', '股東往來（還）'):
                 target  = CashAccount.query.get(data['target_account_id'])
 
@@ -1550,6 +1552,22 @@ def create_app():
                         'expected_allocate_date': sd.expected_allocate_date.isoformat() if sd.expected_allocate_date else None,
                     })
 
+        # Attach pending capital increases
+        pending_ci = CashCapitalIncrease.query.filter_by(allocated=False).all()
+        for ci in pending_ci:
+            label = broker_label_map.get((ci.entity, ci.broker))
+            if not label or label not in output:
+                continue
+            for p in output[label]:
+                if p['security_code'] == ci.security_code:
+                    p.setdefault('pending_capital_increases', []).append({
+                        'id': ci.id,
+                        'shares': ci.shares,
+                        'price_per_share': ci.price_per_share,
+                        'expected_allocate_date': ci.expected_allocate_date.isoformat() if ci.expected_allocate_date else None,
+                        'note': ci.note,
+                    })
+
         return jsonify(output)
 
 
@@ -1598,49 +1616,17 @@ def create_app():
         rows = q.order_by(CashDividend.announce_date.desc()).all()
         return jsonify([r.to_dict() for r in rows])
 
-    def _get_account_shares(account_no, code):
-        """Replay this single account's transaction history for one security
-        and return current shares held — exact broker-level figure (mirrors
-        the logic in /api/positions/by_broker, scoped to one account)."""
-        txns = (Transaction.query
-                .filter_by(account_no=account_no, security_code=code)
-                .filter(Transaction.shares != 0)
-                .order_by(Transaction.trade_date)
-                .all())
-        shares, total_cost = 0.0, 0.0
-        for t in txns:
-            if t.shares > 0:
-                shares     += t.shares
-                total_cost += t.gross_amount + t.fee
-            else:
-                if shares > 0:
-                    sell_qty = abs(t.shares)
-                    avg      = total_cost / shares
-                    shares     -= sell_qty
-                    total_cost -= avg * sell_qty
-                    if shares < 0.001:
-                        shares, total_cost = 0, 0
-        return shares
-
     @app.route('/api/cash_dividends/shares_held', methods=['GET'])
     def get_cash_dividend_shares_held():
-        """Auto-calc helper: given entity+broker+security_code, return current
-        shares held in that EXACT broker account (not the entity-wide total)."""
+        """Auto-calc helper: given entity+broker+security_code, return current shares held."""
         form_entity = request.args.get('entity')
         broker      = request.args.get('broker')
         code        = request.args.get('security_code')
         if not all([form_entity, broker, code]):
             return jsonify({'error': '缺少參數'}), 400
-        pos_entity   = _dividend_position_entity(form_entity, broker)
-        real_broker  = '國泰' if broker == '私銀國泰' else broker
-        account_no = None
-        for acc_no, info in ACCOUNT_MAP.items():
-            if info['entity'] == pos_entity and info['broker'] == real_broker:
-                account_no = acc_no
-                break
-        if not account_no:
-            return jsonify({'shares_held': 0})
-        return jsonify({'shares_held': _get_account_shares(account_no, code)})
+        pos_entity = _dividend_position_entity(form_entity, broker)
+        pos = Position.query.filter_by(entity=pos_entity, security_code=code).first()
+        return jsonify({'shares_held': pos.shares if pos else 0})
 
     @app.route('/api/cash_dividends', methods=['POST'])
     def add_cash_dividend():
@@ -1898,7 +1884,6 @@ def create_app():
 
         sd.allocated    = True
         sd.allocated_at = datetime.utcnow()
-        sd.transaction_id = txn.id
         db.session.commit()
         _audit('edit', 'stock_dividends', sd.id,
 
@@ -1917,16 +1902,11 @@ def create_app():
         pos_entity_for_cleanup = None
         if sd.allocated:
             pos_entity_for_cleanup = _dividend_position_entity(sd.entity, sd.broker)
-            matching_txn = None
-            if sd.transaction_id:
-                matching_txn = Transaction.query.get(sd.transaction_id)
-            if not matching_txn:
-                # Legacy fallback for rows allocated before transaction_id existed
-                matching_txn = (Transaction.query
-                    .filter_by(entity=pos_entity_for_cleanup, security_code=sd.security_code,
-                              shares=sd.bonus_shares, price=0)
-                    .filter(Transaction.memo.like(f'股票股利入集保%{sd.period_note or ""}%'))
-                    .first())
+            matching_txn = (Transaction.query
+                .filter_by(entity=pos_entity_for_cleanup, security_code=sd.security_code,
+                          shares=sd.bonus_shares, price=0)
+                .filter(Transaction.memo.like(f'股票股利入集保%{sd.period_note or ""}%'))
+                .first())
             if matching_txn:
                 db.session.delete(matching_txn)
 
@@ -1939,194 +1919,135 @@ def create_app():
                '刪除股票股利（含已入集保記錄回滾）' if snap.get('allocated') else '刪除股票股利', snap)
         return jsonify({'status': 'ok'})
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 海外投資 (Foreign Investment) — 私RC / 私華強 Phase 1
-    # ══════════════════════════════════════════════════════════════════════
+    # ── 現金增資 (Cash Capital Increase) ─────────────────────────────────────
+    @app.route('/api/capital_increases', methods=['GET'])
+    def get_capital_increases():
+        items = CashCapitalIncrease.query.order_by(CashCapitalIncrease.payment_date.desc()).all()
+        return jsonify([ci.to_dict() for ci in items])
 
-    @app.route('/api/foreign/manual_entry', methods=['POST'])
-    def foreign_manual_entry():
-        """
-        Manually add a foreign (US/JP) trade for 私RC or 私華強.
-        Always available as a fallback even once PDF parsing is wired up.
-        Body: { entity, currency, trade_date, security_code, security_name,
-                shares, price, gross_amount, fee, tax, net_amount, memo }
-        JP security codes should be sent WITHOUT '.JP' suffix from the
-        frontend (e.g. '8002') — this route appends it automatically.
-        """
-        data = request.get_json()
-        entity   = data.get('entity')
-        currency = data.get('currency')
-        if entity not in FOREIGN_ENTITIES:
-            return jsonify({'error': f'entity 必須是 {FOREIGN_ENTITIES} 之一'}), 400
-        if currency not in FOREIGN_CURRENCIES:
-            return jsonify({'error': f'currency 必須是 {FOREIGN_CURRENCIES} 之一'}), 400
-
-        raw_code = (data.get('security_code') or '').strip().upper()
-        code = f'{raw_code}.JP' if (currency == 'JPY' and raw_code and not raw_code.endswith('.JP')) else raw_code
-        name = (data.get('security_name') or '').strip()
-
-        if code:
-            sec = Security.query.get(code)
-            if not sec:
-                db.session.add(Security(code=code, name=name or code,
-                                        region=('JP' if currency == 'JPY' else 'US'),
-                                        currency=currency))
-            elif name and sec.name != name:
-                sec.name = name
-
+    @app.route('/api/capital_increases', methods=['POST'])
+    def add_capital_increase():
+        data = request.json
         try:
-            trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
+            payment_date = date.fromisoformat(data['payment_date'])
         except Exception:
-            return jsonify({'error': 'trade_date 格式錯誤，需為 YYYY-MM-DD'}), 400
-        settle_date = None
-        if data.get('settle_date'):
-            settle_date = datetime.strptime(data['settle_date'], '%Y-%m-%d').date()
-
-        shares       = float(data.get('shares') or 0)
-        gross_amount = float(data.get('gross_amount') or 0)
-        fee          = float(data.get('fee') or 0)
-        tax          = float(data.get('tax') or 0)
-        net_amount   = data.get('net_amount')
-        net_amount   = float(net_amount) if net_amount not in (None, '') else (
-            gross_amount + fee + tax if shares > 0 else gross_amount - fee - tax
+            return jsonify({'error': '日期格式錯誤'}), 400
+        shares = float(data.get('shares', 0))
+        price  = float(data.get('price_per_share', 0))
+        if shares <= 0 or price <= 0:
+            return jsonify({'error': '股數和單價必須大於 0'}), 400
+        code = str(data.get('security_code', '')).strip()
+        if not code:
+            return jsonify({'error': '請填股票代號'}), 400
+        # Ensure security exists
+        if not Security.query.get(code):
+            name = data.get('security_name') or fetch_twse_name(code) or code
+            db.session.add(Security(code=code, name=name))
+        expected = None
+        if data.get('expected_allocate_date'):
+            try:
+                expected = date.fromisoformat(data['expected_allocate_date'])
+            except Exception:
+                pass
+        ci = CashCapitalIncrease(
+            payment_date           = payment_date,
+            entity                 = data['entity'],
+            broker                 = data['broker'],
+            security_code          = code,
+            shares                 = shares,
+            price_per_share        = price,
+            total_amount           = round(shares * price),
+            expected_allocate_date = expected,
+            note                   = data.get('note') or None,
         )
+        db.session.add(ci)
+        db.session.commit()
+        _audit('create', 'cash_capital_increases', ci.id, f'新增現金增資 {ci.entity} {code} {shares}股@{price}', ci.to_dict())
+        return jsonify(ci.to_dict()), 201
 
-        txn = ForeignTransaction(
-            trade_date=trade_date, settle_date=settle_date, entity=entity, currency=currency,
-            security_code=code or None, security_name=name or None,
-            shares=shares, price=data.get('price'), gross_amount=gross_amount,
-            fee=fee, tax=tax, net_amount=net_amount, memo=data.get('memo'),
-            source_file='manual',
+    @app.route('/api/capital_increases/<int:ci_id>', methods=['PUT'])
+    def update_capital_increase(ci_id):
+        ci = CashCapitalIncrease.query.get(ci_id)
+        if not ci:
+            return jsonify({'error': '找不到記錄'}), 404
+        data = request.json
+        if data.get('payment_date'):
+            ci.payment_date = date.fromisoformat(data['payment_date'])
+        if data.get('expected_allocate_date'):
+            ci.expected_allocate_date = date.fromisoformat(data['expected_allocate_date'])
+        elif 'expected_allocate_date' in data:
+            ci.expected_allocate_date = None
+        if data.get('shares'):      ci.shares         = float(data['shares'])
+        if data.get('price_per_share'): ci.price_per_share = float(data['price_per_share'])
+        ci.total_amount = round(ci.shares * ci.price_per_share)
+        if 'note' in data:          ci.note           = data['note'] or None
+        db.session.commit()
+        _audit('edit', 'cash_capital_increases', ci.id, f'編輯現金增資', ci.to_dict())
+        return jsonify(ci.to_dict())
+
+    @app.route('/api/capital_increases/<int:ci_id>/allocate', methods=['POST'])
+    def allocate_capital_increase(ci_id):
+        """Sophie clicks 已入集保 — creates a real buy Transaction at the agreed price."""
+        ci = CashCapitalIncrease.query.get(ci_id)
+        if not ci:
+            return jsonify({'error': '找不到記錄'}), 404
+        if ci.allocated:
+            return jsonify({'error': '此筆已標記為入集保'}), 400
+        pos_entity = _dividend_position_entity(ci.entity, ci.broker)
+        sec = Security.query.get(ci.security_code)
+        account_no = None
+        for acc_no, info in ACCOUNT_MAP.items():
+            if info['entity'] == pos_entity and info['broker'] == (
+                '國泰' if ci.broker == '私銀國泰' else ci.broker
+            ):
+                account_no = acc_no
+                break
+        if not account_no:
+            return jsonify({'error': f'找不到對應帳戶：{pos_entity} {ci.broker}'}), 404
+        txn = Transaction(
+            trade_date=date.today(), settle_date=date.today(),
+            entity=pos_entity, broker=('國泰' if ci.broker=='私銀國泰' else ci.broker),
+            account_no=account_no, security_code=ci.security_code,
+            security_name=sec.name if sec else ci.security_code,
+            shares=ci.shares, price=ci.price_per_share,
+            gross_amount=ci.total_amount, fee=0, tax=0,
+            net_amount=-ci.total_amount,  # cash already left on payment_date
+            memo=f'現金增資入集保（{ci.note or ""}）',
         )
         db.session.add(txn)
+        db.session.flush()
+        recalculate_positions(pos_entity)
+        ci.allocated     = True
+        ci.allocated_at  = datetime.utcnow()
+        ci.transaction_id = txn.id
         db.session.commit()
+        _audit('edit', 'cash_capital_increases', ci.id, f'現金增資已入集保 {pos_entity} {ci.security_code} +{ci.shares}股', ci.to_dict())
+        return jsonify(ci.to_dict())
 
-        recalculate_foreign_positions(entity, currency)
+    @app.route('/api/capital_increases/<int:ci_id>', methods=['DELETE'])
+    def delete_capital_increase(ci_id):
+        ci = CashCapitalIncrease.query.get(ci_id)
+        if not ci:
+            return jsonify({'error': '找不到記錄'}), 404
+        snap = ci.to_dict()
+        pos_entity_for_cleanup = None
+        if ci.allocated:
+            pos_entity_for_cleanup = _dividend_position_entity(ci.entity, ci.broker)
+            txn = Transaction.query.get(ci.transaction_id) if ci.transaction_id else None
+            if not txn:
+                txn = (Transaction.query
+                    .filter_by(entity=pos_entity_for_cleanup, security_code=ci.security_code,
+                               shares=ci.shares, price=ci.price_per_share)
+                    .filter(Transaction.memo.like('現金增資入集保%'))
+                    .first())
+            if txn:
+                db.session.delete(txn)
+        db.session.delete(ci)
         db.session.commit()
-
-        _audit('create', 'foreign_transactions', txn.id, f'手動新增海外交易 {entity}/{currency} {code}')
-        db.session.commit()
-
-        return jsonify({'status': 'ok', 'transaction': txn.to_dict()})
-
-    @app.route('/api/foreign/transactions', methods=['GET'])
-    def get_foreign_transactions():
-        entity   = request.args.get('entity')
-        currency = request.args.get('currency')
-        q = ForeignTransaction.query
-        if entity:
-            q = q.filter_by(entity=entity)
-        if currency:
-            q = q.filter_by(currency=currency)
-        txns = q.order_by(ForeignTransaction.trade_date.desc(), ForeignTransaction.id.desc()).all()
-        return jsonify([t.to_dict() for t in txns])
-
-    @app.route('/api/foreign/transactions/<int:txn_id>', methods=['DELETE'])
-    def delete_foreign_transaction(txn_id):
-        txn = ForeignTransaction.query.get_or_404(txn_id)
-        entity, currency = txn.entity, txn.currency
-        snap = txn.to_dict()
-        db.session.delete(txn)
-        db.session.commit()
-        recalculate_foreign_positions(entity, currency)
-        db.session.commit()
-        _audit('delete', 'foreign_transactions', txn_id, f'刪除海外交易 {entity}/{currency}', snap)
-        db.session.commit()
-        return jsonify({'status': 'ok'})
-
-    @app.route('/api/foreign/transactions/<int:txn_id>', methods=['PUT'])
-    def update_foreign_transaction(txn_id):
-        txn = ForeignTransaction.query.get_or_404(txn_id)
-        data = request.get_json()
-        snap = txn.to_dict()
-        for field in ['security_code', 'security_name', 'price', 'gross_amount',
-                      'fee', 'tax', 'net_amount', 'memo']:
-            if field in data:
-                setattr(txn, field, data[field])
-        if 'shares' in data:
-            txn.shares = float(data['shares'])
-        if 'trade_date' in data:
-            txn.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
-        db.session.commit()
-        recalculate_foreign_positions(txn.entity, txn.currency)
-        db.session.commit()
-        _audit('edit', 'foreign_transactions', txn_id, f'編輯海外交易 {txn.entity}/{txn.currency}', snap)
-        db.session.commit()
-        return jsonify({'status': 'ok', 'transaction': txn.to_dict()})
-
-    @app.route('/api/foreign/positions', methods=['GET'])
-    def get_foreign_positions():
-        """庫存總表(美日) data — positions for 私RC/私華強, grouped by currency."""
-        entity   = request.args.get('entity')
-        currency = request.args.get('currency')
-        q = ForeignPosition.query.filter(ForeignPosition.shares > 0)
-        if entity:
-            q = q.filter_by(entity=entity)
-        if currency:
-            q = q.filter_by(currency=currency)
-        positions = q.all()
-        realized  = calculate_foreign_realized_pnl()
-        return jsonify({
-            'positions': [p.to_dict() for p in positions],
-            'realized_pnl': {f'{ent}_{cur}': val for (ent, cur), val in realized.items()},
-            'fx_rates': {cur: get_latest_fx_rate(cur) for cur in FOREIGN_CURRENCIES},
-        })
-
-    @app.route('/api/foreign/realized_pnl', methods=['GET'])
-    def get_foreign_realized_pnl():
-        realized = calculate_foreign_realized_pnl()
-        return jsonify({f'{ent}_{cur}': val for (ent, cur), val in realized.items()})
-
-    @app.route('/api/foreign/prices/update', methods=['POST'])
-    def update_foreign_prices():
-        """Manually-entered prices only for Phase 1 (no live US/JP feed wired up yet)."""
-        data = request.get_json() or {}
-        updates = data.get('prices', [])  # [{security_code, price}]
-        updated = []
-        for u in updates:
-            code = u.get('security_code')
-            price = u.get('price')
-            if not code or price is None:
-                continue
-            for pos in ForeignPosition.query.filter_by(security_code=code).all():
-                pos.last_price = float(price)
-                pos.price_date = date.today()
-                updated.append(code)
-        db.session.commit()
-        return jsonify({'status': 'ok', 'updated': updated})
-
-    @app.route('/api/foreign/securities', methods=['GET'])
-    def get_foreign_securities():
-        currency = request.args.get('currency')
-        q = Security.query.filter(Security.currency.in_(FOREIGN_CURRENCIES))
-        if currency:
-            q = q.filter_by(currency=currency)
-        return jsonify([s.to_dict() for s in q.order_by(Security.code).all()])
-
-    # ── FX rates (separate tab, per Bryan's request) ───────────────────────
-    @app.route('/api/fx_rates', methods=['GET'])
-    def get_fx_rates():
-        currency = request.args.get('currency')
-        q = FxRate.query
-        if currency:
-            q = q.filter_by(currency=currency)
-        rates = q.order_by(FxRate.rate_date.desc()).limit(100).all()
-        return jsonify([r.to_dict() for r in rates])
-
-    @app.route('/api/fx_rates', methods=['POST'])
-    def add_fx_rate():
-        data = request.get_json()
-        currency = data.get('currency')
-        if currency not in FOREIGN_CURRENCIES:
-            return jsonify({'error': f'currency 必須是 {FOREIGN_CURRENCIES} 之一'}), 400
-        rate_date = datetime.strptime(data['rate_date'], '%Y-%m-%d').date()
-        existing = FxRate.query.filter_by(currency=currency, rate_date=rate_date).first()
-        if existing:
-            existing.rate = float(data['rate'])
-        else:
-            db.session.add(FxRate(currency=currency, rate_date=rate_date,
-                                  rate=float(data['rate']), source='manual'))
-        db.session.commit()
+        if pos_entity_for_cleanup:
+            recalculate_positions(pos_entity_for_cleanup)
+            db.session.commit()
+        _audit('delete', 'cash_capital_increases', ci_id, '刪除現金增資', snap)
         return jsonify({'status': 'ok'})
 
     # ── Audit log ────────────────────────────────────────────────────────────
@@ -2170,23 +2091,27 @@ def _migrate_add_price_type():
         db.session.rollback()
 
 
-def _migrate_add_stock_dividend_transaction_id():
-    """Add transaction_id column to stock_dividends table if it doesn't exist yet."""
+def _migrate_add_capital_increases_table():
+    """Create cash_capital_increases table if it doesn't exist yet."""
     try:
-        db.session.execute(db.text(
-            "ALTER TABLE stock_dividends ADD COLUMN IF NOT EXISTS transaction_id INTEGER REFERENCES transactions(id)"
-        ))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-
-def _migrate_add_security_currency():
-    """Add currency column to securities table if it doesn't exist yet (for foreign module)."""
-    try:
-        db.session.execute(db.text(
-            "ALTER TABLE securities ADD COLUMN IF NOT EXISTS currency VARCHAR(5) DEFAULT 'TWD'"
-        ))
+        db.session.execute(db.text("""
+            CREATE TABLE IF NOT EXISTS cash_capital_increases (
+                id                     SERIAL PRIMARY KEY,
+                payment_date           DATE NOT NULL,
+                entity                 VARCHAR(20) NOT NULL,
+                broker                 VARCHAR(20) NOT NULL,
+                security_code          VARCHAR(20) REFERENCES securities(code),
+                shares                 FLOAT NOT NULL,
+                price_per_share        FLOAT NOT NULL,
+                total_amount           FLOAT NOT NULL,
+                expected_allocate_date DATE,
+                note                   VARCHAR(200),
+                allocated              BOOLEAN DEFAULT FALSE,
+                allocated_at           TIMESTAMP,
+                transaction_id         INTEGER REFERENCES transactions(id),
+                created_at             TIMESTAMP DEFAULT NOW()
+            )
+        """))
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -2212,54 +2137,6 @@ def _seed_securities():
     for code, name in known.items():
         if not Security.query.get(code):
             db.session.add(Security(code=code, name=name))
-    db.session.commit()
-
-
-def _seed_foreign_securities():
-    """
-    Pre-populate known US/JP securities from Sophie's 證券名稱USD/JPY sheets.
-    JP codes are suffixed '.JP' (e.g. '8002.JP') to avoid colliding with
-    TW security codes, matching the convention Sophie already uses in the
-    地區 column. BMNR name corrected from '台幣換美金' (data-entry mistake)
-    to '以太坊儲備企業'.
-    """
-    usd_known = {
-        'AAOI': 'Applied Optoelectronics', 'AAPL': '蘋果', 'ALAB': 'Astera Labs Inc',
-        'APP': 'Applovin Corp.開發者行銷和營利平台供應商', 'ARGT': '阿根廷ETF',
-        'ARKF': 'ARK金融科技創新主動型ETF', 'ARKX': 'ARK Space Exploration',
-        'ASML': 'ASML Holdings NV', 'BAND': 'Bandwidth Inc', 'BE': 'Bloom Energy Corporation',
-        'BMNR': '以太坊儲備企業', 'BRK/B': '波克夏B', 'CDE': 'Coeur Mining Inc',
-        'COIN': 'Coinbase', 'CRDO': '克里多科技', 'CRM': '賽富時Salesforce',
-        'CRWD': 'Crowd Strike', 'DRAM': 'Roundhill Memory ETF', 'DUOL': 'Duolingo Inc',
-        'GEV': 'GE Vernoval Inc', 'GOOG': '谷歌字母', 'HACK': 'Amplify網路安全ETF',
-        'IGV': 'iShares拓展科技軟體', 'INTC': '英特爾', 'IONQ': 'IonQ 純量子計算公司',
-        'ISRG': '直覺外科', 'IWM': 'ishares Russell 2000', 'KBWB': 'Ivesco KBW Bank ETF',
-        'LEU': 'Centrus Energy 核電原料廠商', 'LITE': 'Lumenten Holdings', 'MRVL': 'Marvell',
-        'MSFT': '微軟', 'MU': '美光', 'NBIS': 'Nebius Group人工智慧', 'NET': 'Cloudflare 網路安全',
-        'NLR': '鈾與核能ETF', 'NVDA': '輝達', 'OKLO': 'OKLO先進核能', 'PSN': 'Parsons Corp',
-        'PSQ': 'ProShares放空型納斯達克指數ETF', 'QQQ': '納斯達克100指數ETF', 'QTUM': '量子ETF',
-        'RBRK': 'Rubrik 數據安全公司', 'RDDT': 'Rddit社群媒體公司', 'RGTI': 'Rigetti 超導量子',
-        'RKLB': 'Rocket太空', 'SLV': 'iShart Silver Trust', 'SOXX': 'iShares Semiconductor ETF',
-        'TSM': '台積電ADR', 'UFO': 'Producer Space ETF',
-    }
-    jpy_known = {
-        '1615': 'NEXT FUNDS TOPIX Banks', '1629': 'NEXT FUNDS TOPIX17', '4704': 'Trend Micro',
-        '8001': 'ITOCHU Corp', '8002': 'Marubeni', '8053': 'Sumitomo', '8306': 'MUFG',
-        '8316': 'SMFG', '8411': 'Mizuho', '9433': 'KDDI',
-    }
-    for code, name in usd_known.items():
-        if not Security.query.get(code):
-            db.session.add(Security(code=code, name=name, region='US', currency='USD'))
-        else:
-            sec = Security.query.get(code)
-            if not sec.currency or sec.currency == 'TWD':
-                sec.currency = 'USD'
-            if code == 'BMNR':
-                sec.name = '以太坊儲備企業'
-    for code, name in jpy_known.items():
-        jp_code = f'{code}.JP'
-        if not Security.query.get(jp_code):
-            db.session.add(Security(code=jp_code, name=name, region='JP', currency='JPY'))
     db.session.commit()
 
 

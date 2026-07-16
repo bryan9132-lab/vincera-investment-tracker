@@ -19,13 +19,6 @@ ACCOUNT_MAP = {
 
 ENTITIES = ['RC', '華強', '私銀RC', '私銀華強']
 
-# ── Foreign (海外) investment entities — completely separate ledger from
-# the Taiwan entities above. Same broker (國泰世華銀行) but Sophie/RC keep
-# the records fully separate, so these never touch TW Position/cash logic. ──
-FOREIGN_ENTITIES = ['私RC', '私華強']           # Phase 1: private-bank US/JP holdings
-FOREIGN_CURRENCIES = ['USD', 'JPY']             # currency-segregated, like Sophie's sheets
-FOREIGN_REGIONS = {'USD': '美國', 'JPY': '日本'}  # for display labeling
-
 # ── Cash account master config ─────────────────────────────────────────────
 # is_static=True  → balance is a single number, no ledger entries
 # is_static=False → full ledger with CashEntry rows
@@ -151,12 +144,11 @@ class Security(db.Model):
     name        = db.Column(db.String(100), nullable=False)
     region      = db.Column(db.String(10),  default='T')
     price_type  = db.Column(db.String(10),  default='成交價')  # '成交價' or '均價' (興櫃)
-    currency    = db.Column(db.String(5),   default='TWD')    # 'TWD' / 'USD' / 'JPY' — for foreign securities
     created_at  = db.Column(db.DateTime,    default=datetime.utcnow)
 
     def to_dict(self):
         return {'code': self.code, 'name': self.name, 'region': self.region,
-                'price_type': self.price_type or '成交價', 'currency': self.currency or 'TWD'}
+                'price_type': self.price_type or '成交價'}
 
 
 class Transaction(db.Model):
@@ -428,155 +420,8 @@ class FundEntry(db.Model):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Foreign (海外) investment models — 私RC / 私華強 (Phase 1)
-#
-# Deliberately separate tables from Transaction/Position (not just a new
-# `entity` value) because: (1) currency is core to every row here and would
-# otherwise be a TWD-only field bolted on, (2) keeps TW recalculate logic
-# completely untouched as confirmed with Bryan, (3) JP security codes are
-# 4-digit numbers that can collide with TW codes, so foreign JP securities
-# are keyed as '<code>.JP' (matching the 地區 column convention Sophie
-# already uses in 證券名稱JPY) to avoid clashing with Security.code for TW.
-# USD tickers are stored as-is (alpha tickers don't collide with TW numeric
-# codes).
+# Dividend tracking — 現金股利 & 股票股利
 # ══════════════════════════════════════════════════════════════════════════════
-
-class ForeignTransaction(db.Model):
-    """One row per foreign (US/JP) trade — manual entry or PDF parse, for 私RC/私華強."""
-    __tablename__ = 'foreign_transactions'
-
-    id              = db.Column(db.Integer,     primary_key=True)
-    trade_date      = db.Column(db.Date,        nullable=False)
-    settle_date     = db.Column(db.Date,        nullable=True)
-    entity          = db.Column(db.String(20),  nullable=False)   # '私RC' / '私華強'
-    currency        = db.Column(db.String(5),   nullable=False)   # 'USD' / 'JPY'
-    security_code   = db.Column(db.String(20),  db.ForeignKey('securities.code'), nullable=True)
-    security_name   = db.Column(db.String(100), nullable=True)
-    shares          = db.Column(db.Float,       nullable=False)   # +buy / -sell
-    price           = db.Column(db.Float,       nullable=True)    # 投資單價
-    gross_amount    = db.Column(db.Float,       nullable=False)   # 成交價金
-    fee             = db.Column(db.Float,       default=0)
-    tax             = db.Column(db.Float,       default=0)        # 證交稅 (USD sheet only)
-    net_amount      = db.Column(db.Float,       nullable=False)   # 應收付金額
-    memo            = db.Column(db.String(200), nullable=True)
-    source_file     = db.Column(db.String(200), nullable=True)
-    created_at      = db.Column(db.DateTime,    default=datetime.utcnow)
-
-    security        = db.relationship('Security', backref='foreign_transactions')
-
-    def to_dict(self):
-        return {
-            'id':            self.id,
-            'trade_date':    self.trade_date.isoformat(),
-            'settle_date':   self.settle_date.isoformat() if self.settle_date else None,
-            'entity':        self.entity,
-            'currency':      self.currency,
-            'security_code': self.security_code,
-            'security_name': self.security_name,
-            'shares':        self.shares,
-            'price':         self.price,
-            'gross_amount':  self.gross_amount,
-            'fee':           self.fee,
-            'tax':           self.tax,
-            'net_amount':    self.net_amount,
-            'memo':          self.memo,
-        }
-
-
-class ForeignPosition(db.Model):
-    """Current foreign holdings per entity per currency per security (私RC/私華強)."""
-    __tablename__ = 'foreign_positions'
-
-    id              = db.Column(db.Integer,     primary_key=True)
-    entity          = db.Column(db.String(20),  nullable=False)
-    currency        = db.Column(db.String(5),   nullable=False)
-    security_code   = db.Column(db.String(20),  db.ForeignKey('securities.code'), nullable=False)
-    shares          = db.Column(db.Float,       default=0)
-    total_cost      = db.Column(db.Float,       default=0)        # in native currency
-    avg_cost        = db.Column(db.Float,       default=0)
-    last_price      = db.Column(db.Float,       nullable=True)
-    price_date      = db.Column(db.Date,        nullable=True)
-    updated_at      = db.Column(db.DateTime,    default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    security        = db.relationship('Security', backref='foreign_positions')
-
-    __table_args__ = (
-        db.UniqueConstraint('entity', 'currency', 'security_code', name='uq_foreign_entity_currency_security'),
-    )
-
-    def market_value(self):
-        if self.last_price:
-            return self.shares * self.last_price
-        return None
-
-    def unrealized_pnl(self):
-        mv = self.market_value()
-        if mv is not None:
-            return mv - self.total_cost
-        return None
-
-    def to_dict(self):
-        return {
-            'entity':         self.entity,
-            'currency':       self.currency,
-            'security_code':  self.security_code,
-            'security_name':  self.security.name if self.security else self.security_code,
-            'shares':         self.shares,
-            'total_cost':     self.total_cost,
-            'avg_cost':       round(self.avg_cost, 4),
-            'last_price':     self.last_price,
-            'price_date':     self.price_date.isoformat() if self.price_date else None,
-            'market_value':   self.market_value(),
-            'unrealized_pnl': self.unrealized_pnl(),
-        }
-
-
-class ForeignUploadLog(db.Model):
-    """Track uploaded foreign PDFs to prevent duplicates (mirrors UploadLog)."""
-    __tablename__ = 'foreign_upload_logs'
-
-    id              = db.Column(db.Integer,     primary_key=True)
-    filename        = db.Column(db.String(200), nullable=False)
-    entity          = db.Column(db.String(20),  nullable=False)
-    currency        = db.Column(db.String(5),   nullable=False)
-    trade_date      = db.Column(db.Date,        nullable=False)
-    status          = db.Column(db.String(20),  default='pending')
-    uploaded_at     = db.Column(db.DateTime,    default=datetime.utcnow)
-    confirmed_at    = db.Column(db.DateTime,    nullable=True)
-
-    __table_args__ = (
-        db.UniqueConstraint('entity', 'currency', 'trade_date', 'filename', name='uq_foreign_account_date_file'),
-    )
-
-
-class FxRate(db.Model):
-    """
-    Daily FX rate snapshot for display conversion (USD→TWD, JPY→TWD).
-    Separate tab in the UI per Bryan's request, so foreign tables stay
-    in native currency without crowding the layout.
-    """
-    __tablename__ = 'fx_rates'
-
-    id          = db.Column(db.Integer,    primary_key=True)
-    currency    = db.Column(db.String(5),  nullable=False)   # 'USD' / 'JPY'
-    rate_date   = db.Column(db.Date,       nullable=False)   # date this rate applies to
-    rate        = db.Column(db.Float,      nullable=False)   # 1 unit of currency = rate TWD
-    source      = db.Column(db.String(20), default='manual') # 'manual' or 'auto'
-    created_at  = db.Column(db.DateTime,   default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint('currency', 'rate_date', name='uq_currency_rate_date'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id, 'currency': self.currency,
-            'rate_date': self.rate_date.isoformat(), 'rate': self.rate,
-            'source': self.source,
-        }
-
-
-
 
 DIVIDEND_BROKERS = ['元大', '統一', '私銀國泰']
 DIVIDEND_ENTITIES = ['RC', '華強']
@@ -638,7 +483,6 @@ class StockDividend(db.Model):
     expected_allocate_date = db.Column(db.Date,         nullable=True)  # 預計撥券日期
     allocated              = db.Column(db.Boolean,       default=False) # Sophie manually confirms shares landed (集保)
     allocated_at           = db.Column(db.DateTime,      nullable=True)
-    transaction_id         = db.Column(db.Integer,       db.ForeignKey('transactions.id'), nullable=True)  # linked synthetic Transaction once allocated
     created_at             = db.Column(db.DateTime,      default=datetime.utcnow)
 
     security               = db.relationship('Security', backref='stock_dividends')
@@ -656,6 +500,48 @@ class StockDividend(db.Model):
             'bonus_shares':           self.bonus_shares,
             'period_note':            self.period_note,
             'expected_allocate_date': self.expected_allocate_date.isoformat() if self.expected_allocate_date else None,
+            'allocated':              self.allocated,
+            'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
+        }
+
+
+class CashCapitalIncrease(db.Model):
+    """現金增資 — Sophie records payment date and expected allocation date separately.
+    Payment creates a cash outflow on payment_date; stock arrives later on allocate_date.
+    Same lifecycle as StockDividend: pending → allocated (creates real Transaction).
+    """
+    __tablename__ = 'cash_capital_increases'
+
+    id                     = db.Column(db.Integer,    primary_key=True)
+    payment_date           = db.Column(db.Date,       nullable=False)   # 匯款日
+    entity                 = db.Column(db.String(20), nullable=False)
+    broker                 = db.Column(db.String(20), nullable=False)
+    security_code          = db.Column(db.String(20), db.ForeignKey('securities.code'), nullable=False)
+    shares                 = db.Column(db.Float,      nullable=False)   # 認購股數
+    price_per_share        = db.Column(db.Float,      nullable=False)   # 認購單價
+    total_amount           = db.Column(db.Float,      nullable=False)   # 總匯款金額 = shares * price
+    expected_allocate_date = db.Column(db.Date,       nullable=True)    # 預計入集保日
+    note                   = db.Column(db.String(200),nullable=True)    # 備註
+    allocated              = db.Column(db.Boolean,    default=False)    # 已入集保
+    allocated_at           = db.Column(db.DateTime,   nullable=True)
+    transaction_id         = db.Column(db.Integer,    db.ForeignKey('transactions.id'), nullable=True)
+    created_at             = db.Column(db.DateTime,   default=datetime.utcnow)
+
+    security               = db.relationship('Security', backref='capital_increases')
+
+    def to_dict(self):
+        return {
+            'id':                     self.id,
+            'payment_date':           self.payment_date.isoformat() if self.payment_date else None,
+            'entity':                 self.entity,
+            'broker':                 self.broker,
+            'security_code':          self.security_code,
+            'security_name':          self.security.name if self.security else self.security_code,
+            'shares':                 self.shares,
+            'price_per_share':        self.price_per_share,
+            'total_amount':           self.total_amount,
+            'expected_allocate_date': self.expected_allocate_date.isoformat() if self.expected_allocate_date else None,
+            'note':                   self.note,
             'allocated':              self.allocated,
             'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
             'transaction_id':         self.transaction_id,

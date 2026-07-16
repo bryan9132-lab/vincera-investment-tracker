@@ -42,7 +42,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .upload-zone{border:2px dashed var(--border);border-radius:10px;padding:44px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
 .upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:rgba(79,142,247,.05)}
-.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;pointer-events:none}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
 .upload-icon{font-size:32px;margin-bottom:10px}
 .upload-label{font-size:14px;color:var(--text);margin-bottom:5px}
 .upload-hint{font-size:12px;color:var(--muted)}
@@ -185,7 +185,6 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="tab" onclick="switchTab('cashsummary')">💰 資金總表</div>
     <div class="tab" onclick="switchTab('cashledger')">📒 資金細項</div>
     <div class="tab" onclick="switchTab('dividends')">🎁 股利管理</div>
-    <div class="tab" onclick="switchTab('realizedpnl')">📈 已實現損益</div>
   </div>
 
   <!-- ── Tab: Holdings ── -->
@@ -291,6 +290,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
             <th>單價</th>
             <th>手續費</th>
             <th>交易稅</th>
+            <th class="left">備註</th>
             <th></th>
           </tr></thead>
           <tbody id="manual-trades-body"></tbody>
@@ -510,6 +510,89 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         </table>
       </div>
     </div>
+
+    <!-- 現金增資 -->
+    <div class="card">
+      <div class="ledger-toolbar" style="margin-bottom:0">
+        <div class="card-title" style="margin:0">💰 現金增資</div>
+        <button class="btn btn-primary btn-sm" onclick="openCapitalIncreaseModal()">＋ 新增現金增資</button>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table>
+          <thead><tr>
+            <th class="left">匯款日</th><th class="left">帳戶</th><th class="left">券商</th>
+            <th class="left">代號</th><th class="left">名稱</th><th>認購股數</th>
+            <th>認購單價</th><th>總金額</th>
+            <th class="left">預計入集保</th><th class="left">備註</th><th>狀態</th><th class="left">操作</th>
+          </tr></thead>
+          <tbody id="capital-increase-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Capital Increase Modal ── -->
+<div class="modal-overlay" id="capital-increase-modal" style="display:none" onclick="if(event.target.id==='capital-increase-modal')closeCapitalIncreaseModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:520px">
+    <div class="modal-title">新增現金增資</div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>匯款日</label>
+        <input type="date" id="ci-payment-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+      </div>
+      <div class="modal-field">
+        <label>歸屬帳戶</label>
+        <select id="ci-entity" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+          <option>RC</option><option>華強</option><option>私銀RC</option><option>私銀華強</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>存放券商</label>
+        <select id="ci-broker" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+          <option>統一</option><option>元大</option><option>國泰</option><option>私銀國泰</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>股票代號</label>
+        <input type="text" id="ci-code" placeholder="e.g. 6682" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px" oninput="onCICodeChange()">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>股票名稱</label>
+      <input type="text" id="ci-name" placeholder="自動帶入" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>認購股數</label>
+        <input type="number" id="ci-shares" placeholder="e.g. 611" oninput="calcCITotal()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+      </div>
+      <div class="modal-field">
+        <label>認購單價（元/股）</label>
+        <input type="number" id="ci-price" placeholder="e.g. 40" oninput="calcCITotal()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>總匯款金額（自動計算）</label>
+      <input type="number" id="ci-total" readonly style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--mono);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>預計入集保日</label>
+        <input type="date" id="ci-allocate-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+      </div>
+      <div class="modal-field">
+        <label>備註</label>
+        <input type="text" id="ci-note" placeholder="選填" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
+      </div>
+    </div>
+    <input type="hidden" id="ci-edit-id">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCapitalIncreaseModal()">取消</button>
+      <button class="btn btn-success" onclick="submitCapitalIncrease()">✅ 確認儲存</button>
+    </div>
   </div>
 </div>
 
@@ -565,12 +648,12 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <select id="ce-target" class="filter-select" style="width:100%"></select>
     </div>
     <div class="modal-field">
-      <label id="ce-amount-label">金額</label>
-      <input type="number" id="ce-amount" placeholder="e.g. 500000" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
-    </div>
-    <div class="modal-field">
       <label>說明</label>
       <input type="text" id="ce-desc" placeholder="交易說明（選填）" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px">
+    </div>
+    <div class="modal-field">
+      <label id="ce-amount-label">金額</label>
+      <input type="number" id="ce-amount" placeholder="e.g. 500000" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px">
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeCashEntryModal()">取消</button>
@@ -753,41 +836,6 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     </div>
   </div>
 </div>
-
-  <!-- ── Tab: 已實現損益 Ledger (read-only audit trail) ── -->
-  <div class="tab-panel" id="tab-realizedpnl">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="rpnl-filter-entity" class="filter-select" onchange="loadRealizedPnlLedger()">
-          <option value="">全部帳戶</option>
-          <option>RC</option><option>華強</option><option>私銀RC</option><option>私銀華強</option>
-        </select>
-        <select id="rpnl-filter-broker" class="filter-select" onchange="loadRealizedPnlLedger()">
-          <option value="">全部券商</option>
-          <option>統一</option><option>元大</option><option>國泰</option>
-        </select>
-        <select id="rpnl-filter-category" class="filter-select" onchange="loadRealizedPnlLedger()">
-          <option value="">全部類別</option>
-          <option value="股票買賣">股票買賣</option>
-          <option value="貨幣基金">貨幣基金</option>
-          <option value="現金股利">現金股利</option>
-        </select>
-      </div>
-      <div style="font-size:12px;color:var(--muted)" id="rpnl-count"></div>
-    </div>
-    <div class="card" style="padding:0;overflow:hidden">
-      <table>
-        <thead><tr>
-          <th class="left">日期</th><th class="left">帳戶</th><th class="left">券商</th>
-          <th class="left">類別</th><th class="left">代號</th><th class="left">名稱</th>
-          <th>股數</th><th>單價</th><th>淨收付</th>
-          <th>平均成本</th><th>成本基礎</th><th>已實現損益</th><th class="left">備註</th>
-        </tr></thead>
-        <tbody id="rpnl-body"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 <div class="modal-overlay" id="edit-modal" style="display:none" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title">編輯交易記錄</div>
@@ -827,7 +875,7 @@ document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
 function switchTab(name) {
-  const names = ['holdings','upload','history','cashsummary','cashledger','dividends','realizedpnl'];
+  const names = ['holdings','upload','history','cashsummary','cashledger','dividends'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -836,7 +884,6 @@ function switchTab(name) {
   if(name==='cashsummary') loadCashSummary();
   if(name==='cashledger')  loadCashLedger();
   if(name==='dividends')   loadDividends();
-  if(name==='realizedpnl') loadRealizedPnlLedger();
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
@@ -909,16 +956,16 @@ function renderHoldings(data, realized, byBroker) {
                  ⏳ 待入集保 ${zhang}張（預計 ${dateStr} 入集保，屆時才可賣出）
                </div>`;
       }).join('');
-
-      // If there are pending (未入集保) bonus shares, show the projected avg cost
-      // after they land — shares increase but cost stays same, so avg cost drops.
-      const pendingBonus = pending.reduce((s, pd) => s + (pd.bonus_shares || 0), 0);
-      const displayAvgCost = (pendingBonus > 0 && p.shares > 0 && p.total_cost)
-        ? (p.total_cost / (p.shares + pendingBonus))
-        : p.avg_cost;
-      const avgCostLabel = pendingBonus > 0
-        ? `@ ${displayAvgCost?.toFixed(2) ?? '—'} <span style="font-size:10px;color:var(--muted)">(含待配)</span>`
-        : `@ ${p.avg_cost?.toFixed(2) ?? '—'}`;
+      const pendingCI = p.pending_capital_increases || [];
+      const pendingCIHtml = pendingCI.map(ci => {
+        const zhang = +(ci.shares/1000).toFixed(3).toString().replace(/\.?0+$/, '');
+        const dateStr = ci.expected_allocate_date || '未定';
+        const noteStr = ci.note ? `（${ci.note}）` : '';
+        return `<div style="font-size:11px;color:#f0a500;background:var(--surface2);
+                 border-radius:6px;padding:4px 8px;margin-top:4px">
+                 💰 現金增資 ${zhang}張@${ci.price_per_share} 預計 ${dateStr} 入集保${noteStr}
+               </div>`;
+      }).join('');
       return `<div class="stock-row">
         <div class="stock-row-left">
           <div class="stock-row-code">${p.security_code}</div>
@@ -934,13 +981,13 @@ function renderHoldings(data, realized, byBroker) {
         </div>
         <div class="stock-row-right">
           <div class="stock-shares">${+(p.shares/1000).toFixed(3).replace(/\.?0+$/, '')} 張</div>
-          <div class="stock-cost">${avgCostLabel}</div>
+          <div class="stock-cost">@ ${p.avg_cost?.toFixed(2)??'—'}</div>
           <div class="stock-amount">${p.total_cost?fmt(Math.round(p.total_cost)):'—'}</div>
           <div class="stock-pnl ${pnl==null?'':(pnl>=0?'positive':'negative')}">
             ${pnl!=null?(pnl>=0?'+':'')+fmt(Math.round(pnl)):'—'}
           </div>
         </div>
-        ${pendingHtml ? `<div style="grid-column:1/-1">${pendingHtml}</div>` : ''}
+        ${(pendingHtml || pendingCIHtml) ? `<div style="grid-column:1/-1">${pendingHtml}${pendingCIHtml}</div>` : ''}
       </div>`;
     }).join('');
   }
@@ -1052,10 +1099,10 @@ function renderHoldings(data, realized, byBroker) {
     <td class="left">${label}</td>
     <td class="${rc>=0?'positive':'negative'}">${fmt(rc)}</td>
     <td class="${hq>=0?'positive':'negative'}">${fmt(hq)}</td>
-    <td class="${prc>=0?'positive':'negative'}">${fmt(prc)}</td>
-    <td class="${phq>=0?'positive':'negative'}">${fmt(phq)}</td>
-    <td class="${(rc+prc)>=0?'positive':'negative'}">${fmt(rc+prc)}</td>
-    <td class="${(hq+phq)>=0?'positive':'negative'}">${fmt(hq+phq)}</td>
+    <td class="${prc>=0?'positive':'negative'}">${hasPx?fmt(prc):'-'}</td>
+    <td class="${phq>=0?'positive':'negative'}">${hasPx?fmt(phq):'-'}</td>
+    <td class="${(rc+prc)>=0?'positive':'negative'}">${hasPx?fmt(rc+prc):'-'}</td>
+    <td class="${(hq+phq)>=0?'positive':'negative'}">${hasPx?fmt(hq+phq):'-'}</td>
   </tr>`;
 
   realizedTable.innerHTML = `
@@ -1085,21 +1132,13 @@ async function updatePrices() {
 function exportExcel(){ window.location=`${API}/api/export`; toast('📥 下載中...','info'); }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-// Safety net: prevent the browser's default "open dropped file as a new page"
-// behavior anywhere on the page (in case the cursor is a few px outside the
-// drop zone when released), which would otherwise look like "nothing happened".
-window.addEventListener('dragover', e => e.preventDefault());
-window.addEventListener('drop', e => { if(e.target !== document.getElementById('file-input')) e.preventDefault(); });
-
 const zone = document.getElementById('upload-zone');
-zone.addEventListener('click', () => document.getElementById('file-input').click());
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag-over')});
 zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
 zone.addEventListener('drop',e=>{
   e.preventDefault();zone.classList.remove('drag-over');
-  toast(`偵測到 drop 事件，檔案數：${e.dataTransfer.files.length}`,'success');
   const f=e.dataTransfer.files[0];
-  if(f&&f.name.toLowerCase().endsWith('.pdf')) uploadFile(f);
+  if(f&&f.name.endsWith('.pdf')) uploadFile(f);
   else toast('請選擇 PDF 檔案','error');
 });
 function handleFileSelect(input){if(input.files[0])uploadFile(input.files[0])}
@@ -1301,39 +1340,6 @@ function renderHistoryTable(txns){
   }).join('');
 }
 
-// ── 已實現損益 Ledger (read-only) ───────────────────────────────────────────────
-async function loadRealizedPnlLedger(){
-  const entity=document.getElementById('rpnl-filter-entity').value;
-  const broker=document.getElementById('rpnl-filter-broker').value;
-  const category=document.getElementById('rpnl-filter-category').value;
-  let url=`${API}/api/realized_pnl_ledger?`;
-  if(entity) url+=`&entity=${encodeURIComponent(entity)}`;
-  if(broker) url+=`&broker=${encodeURIComponent(broker)}`;
-  if(category) url+=`&category=${encodeURIComponent(category)}`;
-  const res=await fetch(url);
-  const rows=await res.json();
-  document.getElementById('rpnl-count').textContent=`共 ${rows.length} 筆`;
-  renderRealizedPnlTable(rows);
-}
-function renderRealizedPnlTable(rows){
-  const tbody=document.getElementById('rpnl-body');
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';return;}
-  tbody.innerHTML=rows.map(r=>{
-    const pnlCls=(r.realized_pnl||0)<0?'negative':'positive';
-    return `<tr>
-      <td class="left">${r.date||''}</td><td class="left">${r.entity||''}</td><td class="left">${r.broker||''}</td>
-      <td class="left">${r.category||''}</td><td class="left">${r.security_code||''}</td><td class="left">${r.security_name||''}</td>
-      <td>${r.shares!=null?Number(r.shares).toLocaleString():'-'}</td>
-      <td>${r.price!=null?Number(r.price).toLocaleString():'-'}</td>
-      <td>${r.net_amount!=null?Number(r.net_amount).toLocaleString():'-'}</td>
-      <td>${r.avg_cost!=null?Number(r.avg_cost).toLocaleString():'-'}</td>
-      <td>${r.cost_basis!=null?Number(r.cost_basis).toLocaleString():'-'}</td>
-      <td class="${pnlCls}">${r.realized_pnl!=null?Number(r.realized_pnl).toLocaleString():'-'}</td>
-      <td class="left">${r.note||''}</td>
-    </tr>`;
-  }).join('');
-}
-
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 function openEditModal(id){
   const t=allHistoryTxns.find(x=>x.id===id); if(!t) return;
@@ -1427,11 +1433,16 @@ function addManualRow() {
   tr.innerHTML = `
     <td class="left"><input class="edit-input" style="width:90px" id="mr-code-${i}" placeholder="e.g. 6682" onblur="lookupManualName(${i})"></td>
     <td class="left"><input class="name-input" id="mr-name-${i}" placeholder="股票名稱"></td>
-    <td class="left"><select class="filter-select" id="mr-dir-${i}" style="padding:5px 8px;font-size:12px"><option value="1">買入</option><option value="-1">賣出</option></select></td>
+    <td class="left"><select class="filter-select" id="mr-dir-${i}" style="padding:5px 8px;font-size:12px" onchange="onManualDirChange(${i})">
+      <option value="1">買入</option>
+      <option value="-1">賣出</option>
+      <option value="現金增資">現金增資</option>
+    </select></td>
     <td><input class="edit-input" id="mr-shares-${i}" placeholder="張數" oninput="calcManualFee(${i})"></td>
     <td><input class="edit-input" id="mr-price-${i}" placeholder="單價" oninput="calcManualFee(${i})"></td>
     <td><input class="edit-input" id="mr-fee-${i}" placeholder="手續費"></td>
     <td><input class="edit-input" id="mr-tax-${i}" placeholder="交易稅"></td>
+    <td><input class="edit-input" style="width:110px" id="mr-memo-${i}" placeholder="備註（選填）"></td>
     <td><button class="btn btn-danger btn-sm" onclick="document.getElementById('manual-row-${i}').remove()">✕</button></td>`;
   tbody.appendChild(tr);
 }
@@ -1448,18 +1459,33 @@ async function lookupManualName(i) {
   } catch(e) {}
 }
 
+function onManualDirChange(i) {
+  const dir = document.getElementById(`mr-dir-${i}`)?.value;
+  if(dir === '現金增資') {
+    document.getElementById(`mr-fee-${i}`).value = 0;
+    document.getElementById(`mr-tax-${i}`).value = 0;
+  } else {
+    calcManualFee(i);
+  }
+}
+
 function calcManualFee(i) {
   const zhang  = parseFloat(document.getElementById(`mr-shares-${i}`)?.value || 0);
   const price  = parseFloat(document.getElementById(`mr-price-${i}`)?.value || 0);
-  const dir    = parseInt(document.getElementById(`mr-dir-${i}`)?.value || 1);
+  const dir    = document.getElementById(`mr-dir-${i}`)?.value;
   if(!zhang || !price) return;
+  if(dir === '現金增資') {
+    document.getElementById(`mr-fee-${i}`).value = 0;
+    document.getElementById(`mr-tax-${i}`).value = 0;
+    return;
+  }
   const gross = zhang * 1000 * price;
   const acct  = document.getElementById('manual-account')?.value || '';
   const FEE_RATES = {'600826':0.00036477,'133376':0.000625,'600885':0.00036477,
                      '133311':0.000625,'006439':0.00042465,'007065':0.00042465};
   const rate = FEE_RATES[acct] || 0.001425;
   document.getElementById(`mr-fee-${i}`).value = Math.round(gross * rate);
-  document.getElementById(`mr-tax-${i}`).value = dir < 0 ? Math.round(gross * 0.003) : 0;
+  document.getElementById(`mr-tax-${i}`).value = (dir === '-1') ? Math.round(gross * 0.003) : 0;
 }
 
 async function previewManual() {
@@ -1472,13 +1498,17 @@ async function previewManual() {
     const i = row.id.split('-')[2];
     const code   = document.getElementById(`mr-code-${i}`)?.value?.trim();
     const name   = document.getElementById(`mr-name-${i}`)?.value?.trim();
-    const dir    = parseInt(document.getElementById(`mr-dir-${i}`)?.value || 1);
+    const dir    = document.getElementById(`mr-dir-${i}`)?.value;
+    const dirNum = dir === '-1' ? -1 : 1;  // 現金增資 and 買入 both use +1 (shares increase)
     const zhang  = parseFloat(document.getElementById(`mr-shares-${i}`)?.value || 0);
     const price  = parseFloat(document.getElementById(`mr-price-${i}`)?.value || 0);
     const fee    = parseFloat(document.getElementById(`mr-fee-${i}`)?.value || 0);
     const tax    = parseFloat(document.getElementById(`mr-tax-${i}`)?.value || 0);
+    const memo   = document.getElementById(`mr-memo-${i}`)?.value?.trim() || '';
     if(!code || !zhang || !price) return;
-    trades.push({security_code:code, security_name:name, shares:zhang*1000*dir, price, fee, tax});
+    const memoFinal = dir === '現金增資' ? ('現金增資' + (memo ? '：' + memo : '')) : (memo || undefined);
+    trades.push({security_code:code, security_name:name, shares:zhang*1000*dirNum, price, fee, tax,
+                 memo: memoFinal});
   });
   if(!trades.length) { toast('請至少輸入一筆交易','error'); return; }
   await submitManualEntry(account_no, trade_date, trades, false);
@@ -1718,7 +1748,7 @@ function renderLedgerTable(entries) {
     const delBtn = `<button class="btn btn-danger btn-sm" onclick="deleteCashEntry(${e.id})" title="刪除">🗑</button>`;
 
     return `<tr id="ledger-row-${e.id}">
-      <td class="left" id="date-cell-${e.id}">${e.entry_date}</td>
+      <td class="left">${e.entry_date}</td>
       <td class="left" style="font-size:12px;color:var(--muted)">${acctCell}</td>
       <td class="left">${badge}${autoTag}</td>
       <td class="left" id="desc-cell-${e.id}">${desc}</td>
@@ -1733,12 +1763,10 @@ function renderLedgerTable(entries) {
 function startInlineEdit(id) {
   const e = allLedgerEntries.find(x => x.id === id);
   if(!e) return;
-  const dateCell = document.getElementById(`date-cell-${id}`);
   const descCell = document.getElementById(`desc-cell-${id}`);
   const amtCell  = document.getElementById(`amt-cell-${id}`);
   if(!descCell || !amtCell) return;
 
-  if(dateCell) dateCell.innerHTML = `<input id="edit-date-${id}" type="date" value="${e.entry_date}" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:3px 6px">`;
   descCell.innerHTML = `<input id="edit-desc-${id}" value="${e.description||''}" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:3px 6px;width:120px">`;
   amtCell.innerHTML  = `<input id="edit-amt-${id}" value="${e.amount}" type="number" style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;padding:3px 6px;width:90px">
     <button class="btn btn-success btn-sm" onclick="saveInlineEdit(${id})" style="margin-left:4px">✓</button>
@@ -1746,16 +1774,13 @@ function startInlineEdit(id) {
 }
 
 async function saveInlineEdit(id) {
-  const entry_date = document.getElementById(`edit-date-${id}`)?.value;
   const desc   = document.getElementById(`edit-desc-${id}`)?.value ?? '';
   const amount = parseFloat(document.getElementById(`edit-amt-${id}`)?.value);
   if(isNaN(amount)) { toast('請填入有效金額','error'); return; }
   try {
-    const body = {description: desc, amount};
-    if(entry_date) body.entry_date = entry_date;
     const res = await fetch(`${API}/api/cash/entry/${id}`, {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body)
+      body: JSON.stringify({description: desc, amount})
     });
     const data = await res.json();
     if(res.ok) { toast('✅ 已更新','success'); loadCashLedger(); loadCashSummary(); }
@@ -1980,14 +2005,17 @@ let allStockDividends = [];
 async function loadDividends() {
   const entity = document.getElementById('div-filter-entity').value;
   const qs = entity ? `?entity=${entity}` : '';
-  const [cdRes, sdRes] = await Promise.all([
+  const [cdRes, sdRes, ciRes] = await Promise.all([
     fetch(`${API}/api/cash_dividends${qs}`),
     fetch(`${API}/api/stock_dividends${qs}`),
+    fetch(`${API}/api/capital_increases`),
   ]);
   allCashDividends  = await cdRes.json();
   allStockDividends = await sdRes.json();
+  const allCI = await ciRes.json();
   renderCashDividends();
   renderStockDividends();
+  renderCapitalIncreases(allCI);
 }
 
 function renderCashDividends() {
@@ -2301,6 +2329,134 @@ async function allocateStockDividend(id) {
   if (!confirm('確定股票股利已入集保？此操作會將股數正式加入庫存，無法復原。')) return;
   const res = await fetch(`${API}/api/stock_dividends/${id}/allocate`, { method: 'POST' });
   if (res.ok) { toast('✅ 已入集保，庫存已更新', 'success'); loadDividends(); loadHoldings(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+
+// ── 現金增資 ────────────────────────────────────────────────────────────────
+function renderCapitalIncreases(items) {
+  const tbody = document.getElementById('capital-increase-body');
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:20px">尚無現金增資記錄</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map(ci => {
+    const zhang = +(ci.shares/1000).toFixed(3).toString().replace(/\.?0+$/,'');
+    const statusBadge = ci.allocated
+      ? `<span class="tag tag-green">✅ 已入集保</span>`
+      : `<span class="tag" style="background:#f0a50022;color:#f0a500">⏳ 待入集保</span>`;
+    const actions = ci.allocated ? `
+      <button class="btn btn-danger btn-sm" onclick="deleteCapitalIncrease(${ci.id})">刪除</button>`
+    : `
+      <button class="btn btn-ghost btn-sm" onclick="editCapitalIncrease(${JSON.stringify(ci).replace(/"/g,'&quot;')})">編輯</button>
+      <button class="btn btn-success btn-sm" onclick="allocateCapitalIncrease(${ci.id})">標記已入集保</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteCapitalIncrease(${ci.id})">刪除</button>`;
+    return `<tr>
+      <td class="left">${ci.payment_date}</td>
+      <td class="left">${ci.entity}</td>
+      <td class="left">${ci.broker}</td>
+      <td class="left">${ci.security_code}</td>
+      <td class="left">${ci.security_name}</td>
+      <td>${zhang}張 (${fmt(ci.shares)}股)</td>
+      <td>${ci.price_per_share}</td>
+      <td>${fmt(Math.round(ci.total_amount))}</td>
+      <td>${ci.expected_allocate_date || '—'}</td>
+      <td class="left">${ci.note || '—'}</td>
+      <td>${statusBadge}</td>
+      <td class="left">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openCapitalIncreaseModal() {
+  document.getElementById('ci-edit-id').value = '';
+  document.querySelector('#capital-increase-modal .modal-title').textContent = '新增現金增資';
+  document.getElementById('ci-payment-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('ci-code').value = '';
+  document.getElementById('ci-name').value = '';
+  document.getElementById('ci-shares').value = '';
+  document.getElementById('ci-price').value = '';
+  document.getElementById('ci-total').value = '';
+  document.getElementById('ci-allocate-date').value = '';
+  document.getElementById('ci-note').value = '';
+  document.getElementById('capital-increase-modal').style.display = 'flex';
+}
+
+function editCapitalIncrease(ci) {
+  document.getElementById('ci-edit-id').value = ci.id;
+  document.querySelector('#capital-increase-modal .modal-title').textContent = '編輯現金增資';
+  document.getElementById('ci-payment-date').value = ci.payment_date;
+  document.getElementById('ci-entity').value = ci.entity;
+  document.getElementById('ci-broker').value = ci.broker;
+  document.getElementById('ci-code').value = ci.security_code;
+  document.getElementById('ci-name').value = ci.security_name;
+  document.getElementById('ci-shares').value = ci.shares;
+  document.getElementById('ci-price').value = ci.price_per_share;
+  document.getElementById('ci-total').value = Math.round(ci.total_amount);
+  document.getElementById('ci-allocate-date').value = ci.expected_allocate_date || '';
+  document.getElementById('ci-note').value = ci.note || '';
+  document.getElementById('capital-increase-modal').style.display = 'flex';
+}
+
+function closeCapitalIncreaseModal() {
+  document.getElementById('capital-increase-modal').style.display = 'none';
+}
+
+function calcCITotal() {
+  const shares = parseFloat(document.getElementById('ci-shares').value || 0);
+  const price  = parseFloat(document.getElementById('ci-price').value || 0);
+  document.getElementById('ci-total').value = shares && price ? Math.round(shares * price) : '';
+}
+
+async function onCICodeChange() {
+  const code = document.getElementById('ci-code').value.trim();
+  if (!code) return;
+  try {
+    const res = await fetch(`${API}/api/securities/lookup?code=${code}`);
+    const data = await res.json();
+    if (data.name) document.getElementById('ci-name').value = data.name;
+  } catch(e) {}
+}
+
+async function submitCapitalIncrease() {
+  const editId = document.getElementById('ci-edit-id').value;
+  const body = {
+    payment_date:           document.getElementById('ci-payment-date').value,
+    entity:                 document.getElementById('ci-entity').value,
+    broker:                 document.getElementById('ci-broker').value,
+    security_code:          document.getElementById('ci-code').value.trim(),
+    security_name:          document.getElementById('ci-name').value.trim(),
+    shares:                 parseFloat(document.getElementById('ci-shares').value),
+    price_per_share:        parseFloat(document.getElementById('ci-price').value),
+    expected_allocate_date: document.getElementById('ci-allocate-date').value || null,
+    note:                   document.getElementById('ci-note').value.trim() || null,
+  };
+  if (!body.payment_date || !body.security_code || !body.shares || !body.price_per_share) {
+    toast('請填寫必填欄位', 'error'); return;
+  }
+  const url    = editId ? `${API}/api/capital_increases/${editId}` : `${API}/api/capital_increases`;
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (res.ok) {
+    toast(editId ? '✅ 現金增資已更新' : '✅ 現金增資已新增', 'success');
+    closeCapitalIncreaseModal();
+    loadDividends();
+  } else {
+    toast(`❌ ${data.error || '錯誤'}`, 'error');
+  }
+}
+
+async function allocateCapitalIncrease(id) {
+  if (!confirm('確定現金增資股票已入集保？此操作會將股數正式加入庫存（以認購單價計算成本），無法復原。')) return;
+  const res = await fetch(`${API}/api/capital_increases/${id}/allocate`, { method: 'POST' });
+  if (res.ok) { toast('✅ 已入集保，庫存已更新', 'success'); loadDividends(); loadHoldings(); }
+  else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
+}
+
+async function deleteCapitalIncrease(id) {
+  if (!confirm('確定刪除此現金增資記錄？')) return;
+  const res = await fetch(`${API}/api/capital_increases/${id}`, { method: 'DELETE' });
+  if (res.ok) { toast('✅ 已刪除', 'success'); loadDividends(); loadHoldings(); }
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
 }
 </script>
