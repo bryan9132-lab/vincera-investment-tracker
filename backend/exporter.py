@@ -18,6 +18,20 @@ def _thin_border():
     return Border(left=t, right=t, top=t, bottom=t)
 
 
+def _apply_range_border(ws, min_row, min_col, max_row, max_col):
+    """Apply thin border to all edge cells of a merged or plain range."""
+    t = Side(style='thin', color='000000')
+    for r in range(min_row, max_row + 1):
+        for c in range(min_col, max_col + 1):
+            cell = ws.cell(r, c)
+            cell.border = Border(
+                left   = t if c == min_col else None,
+                right  = t if c == max_col else None,
+                top    = t if r == min_row else None,
+                bottom = t if r == max_row else None,
+            )
+
+
 def _cell(ws, row, col, value=None, font_size=20, bold=False,
           align='center', valign='center', wrap=False,
           num_fmt=None, color='000000', border=False):
@@ -47,10 +61,10 @@ def generate_excel() -> str:
 
     # ── Column widths ────────────────────────────────────────────────────────
     col_w = {
-        'A': 11, 'B': 22, 'C': 14, 'D': 18,
-        'E': 12, 'F': 16, 'G': 18,
-        'H': 12, 'I': 16, 'J': 18,
-        'K': 16, 'L': 16,
+        'A': 13, 'B': 21, 'C': 24, 'D': 20,
+        'E': 10, 'F': 14, 'G': 24,
+        'H': 10, 'I': 14, 'J': 24,
+        'K': 17, 'L': 16,
     }
     for col, w in col_w.items():
         ws.column_dimensions[col].width = w
@@ -206,25 +220,8 @@ def generate_excel() -> str:
     ws.row_dimensions[row].height = 51
     row += 2
 
-    # ── 損益 table (RC/華強 only) ─────────────────────────────────────────────
-    ws.merge_cells(start_row=row, start_column=1, end_row=row+1, end_column=2)
-    _cell(ws, row, 1, '損益', font_size=16, bold=True, align='center', border=True)
-    ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=4)
-    c = ws.cell(row, 3, '合計')
-    c.font      = Font(name='微軟正黑體', size=16, bold=True)
-    c.alignment = Alignment(horizontal='center', vertical='center')
-    c.border    = _thin_border()
-    ws.row_dimensions[row].height = 50.1
-    row += 1
-
-    for col_i, lbl in [(3,'RC'), (4,'華強')]:
-        c2 = ws.cell(row, col_i, lbl)
-        c2.font      = Font(name='微軟正黑體', size=16, bold=True)
-        c2.alignment = Alignment(horizontal='center', vertical='center')
-        c2.border    = _thin_border()
-    ws.row_dimensions[row].height = 50.1
-    row += 1
-
+    # ── 損益 + 資金餘額 SIDE-BY-SIDE ─────────────────────────────────────────
+    # LEFT: 損益 (cols A-D)   RIGHT: 賬戶/資金餘額 (cols F-I)
     rRC  = realized.get('RC', 0)   + realized.get('私銀RC', 0)
     rHQ  = realized.get('華強', 0) + realized.get('私銀華強', 0)
     uRC  = sum((p.unrealized_pnl() or 0) for p in Position.query
@@ -232,34 +229,9 @@ def generate_excel() -> str:
     uHQ  = sum((p.unrealized_pnl() or 0) for p in Position.query
               .filter(Position.entity.in_(['華強','私銀華強'])).filter(Position.shares>0).all())
 
-    pnl_rows = [
-        ('已實現損益', rRC, rHQ),
-        ('未實現損益', uRC, uHQ),
-        ('合計', rRC+uRC, rHQ+uHQ),
-    ]
-    for label, rc, hq in pnl_rows:
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-        _cell(ws, row, 1, label, font_size=16, bold=True, align='left', border=True)
-        for col_i, val in enumerate([rc, hq], 3):
-            clr = 'C00000' if val < 0 else '000000'
-            c = ws.cell(row, col_i, round(val))
-            c.font          = Font(name='微軟正黑體', size=20, color=clr)
-            c.alignment     = Alignment(horizontal='right', vertical='center')
-            c.number_format = '#,##0'
-            c.border        = _thin_border()
-        ws.row_dimensions[row].height = 69
-        row += 1
-
-    row += 1
-
-    # ── 資金餘額 (RC/華強 merged) ────────────────────────────────────────────
-    # Excel 資金餘額 only shows investment-related broker accounts:
-    # RC:  國泰復興(統一) + 國泰光復(元大) + 國泰世華世貿(私銀)
-    # 華強: 國泰復興(統一) + 國泰南東(元大) + 國泰世華世貿(私銀)
-    # Excluded: 教南個人, 貨幣基金, 華南銀行, 富邦建國, 元大銀行 etc.
-    RC_INVEST  = {'rc_tuni', 'rc_yuanta', 'rc_private'}
-    HQ_INVEST  = {'hq_tuni', 'hq_yuanta', 'hq_private'}
-
+    # Excel 資金餘額: investment broker accounts only
+    RC_INVEST = {'rc_tuni', 'rc_yuanta', 'rc_private'}
+    HQ_INVEST = {'hq_tuni', 'hq_yuanta', 'hq_private'}
     rc_balance = 0
     hq_balance = 0
     for acct in CashAccount.query.all():
@@ -269,24 +241,65 @@ def generate_excel() -> str:
         elif acct.id in HQ_INVEST:
             hq_balance += bal
 
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-    _cell(ws, row, 1, '賬戶', font_size=16, bold=True, align='center', border=True)
-    ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=4)
-    _cell(ws, row, 3, '資金餘額', font_size=16, bold=True, align='center', border=True)
-    ws.row_dimensions[row].height = 51
-    row += 1
+    pnl_start = row
 
-    for label, bal in [('RC', rc_balance), ('華強', hq_balance)]:
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-        _cell(ws, row, 1, label, font_size=16, bold=True, align='left', border=True)
-        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=4)
-        c = ws.cell(row, 3, round(bal))
+    # ── LEFT: 損益 (cols A-D, rows 0-4) ────────────────────────────────────
+    ws.merge_cells(start_row=pnl_start, start_column=1, end_row=pnl_start+1, end_column=2)
+    _cell(ws, pnl_start, 1, '損益', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 1, pnl_start+1, 2)
+    ws.merge_cells(start_row=pnl_start, start_column=3, end_row=pnl_start, end_column=4)
+    _cell(ws, pnl_start, 3, '合計', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 3, pnl_start, 4)
+    ws.row_dimensions[pnl_start].height = 59.25
+
+    for col_i, lbl in [(3,'RC'), (4,'華強')]:
+        c2 = ws.cell(pnl_start+1, col_i, lbl)
+        c2.font      = Font(name='微軟正黑體', size=16, bold=True)
+        c2.alignment = Alignment(horizontal='center', vertical='center')
+        c2.border    = _thin_border()
+    ws.row_dimensions[pnl_start+1].height = 67.5
+
+    pnl_data = [
+        ('已實現損益', rRC, rHQ),
+        ('未實現損益', uRC, uHQ),
+        ('合計',       rRC+uRC, rHQ+uHQ),
+    ]
+    pnl_row_heights = [77.25, 69, 55.5]
+    for i, (label, rc, hq) in enumerate(pnl_data):
+        r = pnl_start + 2 + i
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+        _cell(ws, r, 1, label, font_size=16, bold=True, align='left')
+        _apply_range_border(ws, r, 1, r, 2)
+        for col_i, val in enumerate([rc, hq], 3):
+            clr = 'C00000' if val < 0 else '000000'
+            c = ws.cell(r, col_i, round(val))
+            c.font          = Font(name='微軟正黑體', size=16, bold=(label=='合計'), color=clr)
+            c.alignment     = Alignment(horizontal='right', vertical='center')
+            c.number_format = '#,##0'
+            c.border        = _thin_border()
+        ws.row_dimensions[r].height = pnl_row_heights[i]
+
+    # ── RIGHT: 資金餘額 (cols F-I, rows 0-2) ────────────────────────────────
+    ws.merge_cells(start_row=pnl_start, start_column=6, end_row=pnl_start, end_column=7)
+    _cell(ws, pnl_start, 6, '賬戶', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 6, pnl_start, 7)
+    ws.merge_cells(start_row=pnl_start, start_column=8, end_row=pnl_start, end_column=9)
+    _cell(ws, pnl_start, 8, '資金餘額', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 8, pnl_start, 9)
+
+    for i, (label, bal) in enumerate([('RC', rc_balance), ('華強', hq_balance)]):
+        r = pnl_start + 1 + i
+        ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=7)
+        _cell(ws, r, 6, label, font_size=16, bold=True, align='left')
+        _apply_range_border(ws, r, 6, r, 7)
+        ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=9)
+        c = ws.cell(r, 8, round(bal))
         c.font          = Font(name='微軟正黑體', size=20)
         c.alignment     = Alignment(horizontal='right', vertical='center')
         c.number_format = '#,##0'
-        c.border        = _thin_border()
-        ws.row_dimensions[row].height = 54
-        row += 1
+        _apply_range_border(ws, r, 8, r, 9)
+
+    row = pnl_start + 5
 
     tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False,
         prefix=f'庫存總表_{date.today().strftime("%Y%m%d")}_')
