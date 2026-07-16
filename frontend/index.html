@@ -348,7 +348,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
       <table>
         <thead><tr>
           <th class="left">日期</th><th class="left">帳戶</th><th class="left">券商</th>
-          <th class="left">代號</th><th class="left">名稱</th>
+          <th class="left">代號</th><th class="left">名稱</th><th class="left">類型</th>
           <th>股數</th><th>單價</th><th>成交金額</th><th>淨收付</th>
           <th class="left">操作</th>
         </tr></thead>
@@ -1323,12 +1323,21 @@ function applyMonthFilter(){
 }
 function renderHistoryTable(txns){
   const tbody=document.getElementById('history-body');
-  if(!txns.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';return;}
+  if(!txns.length){tbody.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';return;}
   tbody.innerHTML=txns.map(t=>{
     const isBuy=t.shares>0;
+    const memo = t.memo || '';
+    const isCI = memo.startsWith('現金增資');
+    const isPeriod = memo.startsWith('股票股利入集保') || memo.startsWith('非股票損益');
+    let typeTag;
+    if(isCI)      typeTag = `<span class="tag" style="background:#f0a50022;color:#f0a500;font-size:10px">💰 現金增資</span>`;
+    else if(isPeriod) typeTag = `<span class="tag" style="background:#88889922;color:var(--muted);font-size:10px">系統</span>`;
+    else if(isBuy) typeTag = `<span class="tag tag-green" style="font-size:10px">買入</span>`;
+    else          typeTag = `<span class="tag tag-orange" style="font-size:10px">賣出</span>`;
     return `<tr>
       <td class="left">${t.trade_date}</td><td class="left">${t.entity}</td><td class="left">${t.broker}</td>
       <td class="left">${t.security_code||''}</td><td class="left">${t.security_name||''}</td>
+      <td class="left">${typeTag}</td>
       <td class="${isBuy?'positive':'negative'}">${Math.abs(t.shares).toLocaleString()}</td>
       <td>${t.price?.toLocaleString()??'-'}</td><td>${t.gross_amount?.toLocaleString()??'-'}</td>
       <td class="${isBuy?'negative':'positive'}">${t.net_amount?.toLocaleString()??'-'}</td>
@@ -1494,23 +1503,63 @@ async function previewManual() {
   if(!account_no) { toast('請選擇帳戶','error'); return; }
   if(!trade_date) { toast('請選擇交易日期','error'); return; }
   const trades = [];
+  const capitalIncreases = [];
   document.querySelectorAll('[id^="manual-row-"]').forEach(row => {
     const i = row.id.split('-')[2];
     const code   = document.getElementById(`mr-code-${i}`)?.value?.trim();
     const name   = document.getElementById(`mr-name-${i}`)?.value?.trim();
     const dir    = document.getElementById(`mr-dir-${i}`)?.value;
-    const dirNum = dir === '-1' ? -1 : 1;  // 現金增資 and 買入 both use +1 (shares increase)
+    const dirNum = dir === '-1' ? -1 : 1;
     const zhang  = parseFloat(document.getElementById(`mr-shares-${i}`)?.value || 0);
     const price  = parseFloat(document.getElementById(`mr-price-${i}`)?.value || 0);
     const fee    = parseFloat(document.getElementById(`mr-fee-${i}`)?.value || 0);
     const tax    = parseFloat(document.getElementById(`mr-tax-${i}`)?.value || 0);
     const memo   = document.getElementById(`mr-memo-${i}`)?.value?.trim() || '';
     if(!code || !zhang || !price) return;
-    const memoFinal = dir === '現金增資' ? ('現金增資' + (memo ? '：' + memo : '')) : (memo || undefined);
-    trades.push({security_code:code, security_name:name, shares:zhang*1000*dirNum, price, fee, tax,
-                 memo: memoFinal});
+
+    if(dir === '現金增資') {
+      capitalIncreases.push({
+        security_code: code, security_name: name,
+        shares: zhang * 1000, price_per_share: price, note: memo || null,
+      });
+    } else {
+      const memoFinal = memo || undefined;
+      trades.push({security_code:code, security_name:name, shares:zhang*1000*dirNum, price, fee, tax,
+                   memo: memoFinal});
+    }
   });
-  if(!trades.length) { toast('請至少輸入一筆交易','error'); return; }
+  if(!trades.length && !capitalIncreases.length) { toast('請至少輸入一筆交易','error'); return; }
+
+  // ── 現金增資: create CashCapitalIncrease records (pending until 入集保) ──
+  for(const ci of capitalIncreases) {
+    const mapping = (await fetch(`${API}/api/accounts`).then(r=>r.json()).catch(()=>null)) || {};
+    const res = await fetch(`${API}/api/capital_increases`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        payment_date: trade_date,
+        entity:  document.getElementById('manual-account').value ? (() => {
+          const acct = document.getElementById('manual-account').value;
+          const map = {'600826':'RC','133376':'RC','600885':'華強','133311':'華強','006439':'私銀RC','007065':'私銀華強'};
+          return map[acct] || 'RC';
+        })() : 'RC',
+        broker: document.getElementById('manual-broker').value,
+        security_code: ci.security_code,
+        security_name: ci.security_name,
+        shares: ci.shares,
+        price_per_share: ci.price_per_share,
+        note: ci.note,
+      })
+    });
+    if(res.ok) {
+      toast(`✅ 現金增資已登錄為「待入集保」— 請至股利管理確認，股票入集保後再標記`, 'success');
+    } else {
+      const err = await res.json();
+      toast(`❌ 現金增資儲存失敗：${err.error}`, 'error');
+    }
+  }
+
+  // ── Regular trades: go through normal preview flow ──
+  if(!trades.length) return;
   await submitManualEntry(account_no, trade_date, trades, false);
 }
 
