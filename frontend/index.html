@@ -531,8 +531,14 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <option value="貨幣基金">貨幣基金</option>
         <option value="現金股利">現金股利</option>
       </select>
+      <select id="rpnl-month" class="filter-select" onchange="loadRealizedPnl()">
+        <option value="">全部月份</option>
+      </select>
     </div>
-    <div style="font-size:12px;color:var(--muted)" id="rpnl-summary"></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="font-size:12px;color:var(--muted)" id="rpnl-summary"></div>
+      <button class="btn btn-success btn-sm" onclick="exportRealizedPnlExcel()">⬇ 匯出 Excel</button>
+    </div>
   </div>
   <div class="card" style="padding:0;overflow:hidden">
     <table>
@@ -2258,10 +2264,13 @@ async function allocateStockDividend(id) {
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
 }
 // ── 已實現損益 Ledger (read-only) ─────────────────────────────────────────────
+let _allRpnlRows = [];  // cache for month filter + export
+
 async function loadRealizedPnl() {
   const entity   = document.getElementById('rpnl-entity')?.value || '';
   const broker   = document.getElementById('rpnl-broker')?.value || '';
   const category = document.getElementById('rpnl-category')?.value || '';
+  const month    = document.getElementById('rpnl-month')?.value || '';
   let url = `${API}/api/realized_pnl_ledger?`;
   if(entity)   url += `&entity=${encodeURIComponent(entity)}`;
   if(broker)   url += `&broker=${encodeURIComponent(broker)}`;
@@ -2269,15 +2278,61 @@ async function loadRealizedPnl() {
   try {
     const res  = await fetch(url);
     const rows = await res.json();
-    const total = rows.reduce((s,r) => s + (r.realized_pnl || 0), 0);
+    _allRpnlRows = rows;
+
+    // Populate month dropdown from actual data
+    const monthSel = document.getElementById('rpnl-month');
+    const months   = [...new Set(rows.map(r => (r.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+    const curMonth = monthSel.value;
+    monthSel.innerHTML = '<option value="">全部月份</option>' +
+      months.map(m => `<option value="${m}" ${m===curMonth?'selected':''}>${m}</option>`).join('');
+
+    // Apply month filter client-side
+    const filtered = month ? rows.filter(r => (r.date||'').startsWith(month)) : rows;
+    const total = filtered.reduce((s,r) => s + (r.realized_pnl || 0), 0);
     const clr   = total >= 0 ? 'var(--positive)' : 'var(--negative)';
     document.getElementById('rpnl-summary').innerHTML =
-      `共 ${rows.length} 筆　合計：<span style="color:${clr};font-weight:700">${fmt(Math.round(total))}</span>`;
-    renderRealizedPnl(rows);
+      `共 ${filtered.length} 筆　合計：<span style="color:${clr};font-weight:700">${fmt(Math.round(total))}</span>`;
+    renderRealizedPnl(filtered);
   } catch(e) {
     document.getElementById('rpnl-body').innerHTML =
       '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:32px">載入失敗</td></tr>';
   }
+}
+
+function exportRealizedPnlExcel() {
+  const month    = document.getElementById('rpnl-month')?.value || '';
+  const entity   = document.getElementById('rpnl-entity')?.value || '';
+  const broker   = document.getElementById('rpnl-broker')?.value || '';
+  const category = document.getElementById('rpnl-category')?.value || '';
+  const rows = month ? _allRpnlRows.filter(r => (r.date||'').startsWith(month)) : _allRpnlRows;
+  if(!rows.length){ toast('沒有資料可匯出','error'); return; }
+
+  // Build CSV (Excel-compatible UTF-8 with BOM)
+  const headers = ['日期','帳戶','券商','類別','代號','名稱','股數','單價','淨收付','平均成本','成本基礎','已實現損益','備註'];
+  const escape  = v => v == null ? '' : `"${String(v).replace(/"/g,'""')}"`;
+  const lines   = [
+    headers.join(','),
+    ...rows.map(r => [
+      r.date, r.entity, r.broker, r.category,
+      r.security_code, r.security_name,
+      r.shares != null ? r.shares : '',
+      r.price  != null ? r.price  : '',
+      r.net_amount  != null ? Math.round(r.net_amount)  : '',
+      r.avg_cost    != null ? r.avg_cost.toFixed(4)     : '',
+      r.cost_basis  != null ? Math.round(r.cost_basis)  : '',
+      r.realized_pnl != null ? Math.round(r.realized_pnl) : '',
+      r.note || '',
+    ].map(escape).join(','))
+  ];
+  const bom  = '\uFEFF';
+  const blob = new Blob([bom + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {href:url});
+  const suffix = [entity,broker,category,month].filter(Boolean).join('_') || '全部';
+  a.download = `已實現損益_${suffix}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function renderRealizedPnl(rows) {
