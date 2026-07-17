@@ -194,17 +194,13 @@ def update_all_prices():
 def calculate_realized_pnl(entity: str = None):
     """
     Calculate realized P&L for each entity by replaying transaction history.
-    Includes:
-      - Stock sell gains/losses (weighted average cost)
-      - Non-stock PNL transactions (貨幣基金收益, memo='非股票損益')
-      - Deposited CashDividend records (配息 already marked 已入帳)
     Returns dict: {entity: realized_pnl}
     """
+    from .models import Transaction, ACCOUNT_MAP
     entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
     result = {}
 
     for ent in entities:
-        # ── 1. Stock sell P&L (weighted average cost) ────────────────────────
         txns = (Transaction.query
                 .filter_by(entity=ent)
                 .filter(Transaction.security_code.isnot(None))
@@ -233,54 +229,33 @@ def calculate_realized_pnl(entity: str = None):
                         holdings[code]['shares']     = 0
                         holdings[code]['total_cost'] = 0
 
-        # ── 2. Non-stock PNL transactions (貨幣基金收益 etc.) ─────────────────
-        misc_total = (db.session.query(db.func.sum(Transaction.net_amount))
-                      .filter_by(entity=ent)
-                      .filter(Transaction.security_code.is_(None))
-                      .filter(Transaction.memo == '非股票損益')
-                      .scalar()) or 0.0
-
-        # ── 3. Deposited cash dividends (配息 marked 已入帳) ─────────────────
-        div_total = (db.session.query(db.func.sum(CashDividend.total_amount))
-                     .filter_by(entity=ent, deposited=True)
-                     .scalar()) or 0.0
-
-        result[ent] = round(realized + misc_total + div_total, 0)
+        result[ent] = round(realized, 0)
 
     return result
 
 
-def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: str = None):
+def get_realized_pnl_ledger(entity=None, broker=None, category=None):
     """
-    Build the full audit trail behind 已實現損益 — every event that
-    contributes to realized P&L, with enough detail (avg cost, cost basis)
-    for Sophie to see exactly where each number came from.
-
-    Read-only by design: every row here is derived from other tabs
-    (交易記錄 for 股票賣出, 股利管理 for 現金股利). Nothing is editable here.
-
-    category: '股票買賣' | '貨幣基金' | '現金股利' | None (all)
-    NOTE: 貨幣基金獲利/利息 isn't modeled as its own entry type in VIT yet
-    (CASH_ENTRY_TYPES has no '基金獲利' type), so that category returns
-    an empty list for now until we decide how Sophie should record it.
+    Full audit trail for 已實現損益 — read-only, sourced from:
+    - Stock sells  (weighted-average-cost replay from Transaction history)
+    - 非股票損益   (貨幣基金收益 etc., stored as Transaction with security_code=None)
+    - 現金股利     (deposited CashDividend records, recognised on announce_date)
     """
-    from .models import ACCOUNT_MAP
     rows = []
 
-    # ── 股票買賣 (weighted-average-cost replay, same method as calculate_realized_pnl) ──
+    # ── 1. Stock sells ────────────────────────────────────────────────────────
     if category in (None, '', '股票買賣'):
         entities = [entity] if entity else list({v['entity'] for v in ACCOUNT_MAP.values()})
         for ent in entities:
             q = (Transaction.query
                  .filter_by(entity=ent)
                  .filter(Transaction.security_code.isnot(None))
+                 .filter(Transaction.shares != 0)
                  .order_by(Transaction.trade_date, Transaction.id))
             if broker:
                 q = q.filter_by(broker=broker)
-            txns = q.all()
-
-            holdings = {}  # code -> {shares, total_cost}
-            for t in txns:
+            holdings = {}
+            for t in q.all():
                 code = t.security_code
                 if code not in holdings:
                     holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
@@ -294,22 +269,22 @@ def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: st
                         cost_basis = avg_cost * sell_qty
                         realized   = t.net_amount - cost_basis
                         rows.append({
-                            'date':            t.trade_date.isoformat() if t.trade_date else None,
-                            'entity':          ent,
-                            'broker':          t.broker,
-                            'category':        '股票買賣',
-                            'security_code':   code,
-                            'security_name':   t.security_name or code,
-                            'shares':          sell_qty,
-                            'price':           t.price,
-                            'gross_amount':    t.gross_amount,
-                            'fee':             t.fee,
-                            'tax':             t.tax,
-                            'net_amount':      t.net_amount,
-                            'avg_cost':        round(avg_cost, 4),
-                            'cost_basis':      round(cost_basis, 0),
-                            'realized_pnl':    round(realized, 0),
-                            'note':            None,
+                            'date':          t.trade_date.isoformat() if t.trade_date else None,
+                            'entity':        ent,
+                            'broker':        t.broker,
+                            'category':      '股票買賣',
+                            'security_code': code,
+                            'security_name': t.security_name or code,
+                            'shares':        sell_qty,
+                            'price':         t.price,
+                            'gross_amount':  t.gross_amount,
+                            'fee':           t.fee,
+                            'tax':           t.tax,
+                            'net_amount':    t.net_amount,
+                            'avg_cost':      round(avg_cost, 4),
+                            'cost_basis':    round(cost_basis, 0),
+                            'realized_pnl':  round(realized, 0),
+                            'note':          None,
                         })
                         holdings[code]['shares']     -= sell_qty
                         holdings[code]['total_cost'] -= avg_cost * sell_qty
@@ -317,165 +292,57 @@ def get_realized_pnl_ledger(entity: str = None, broker: str = None, category: st
                             holdings[code]['shares']     = 0
                             holdings[code]['total_cost'] = 0
 
-    # ── 現金股利 (counted on announce_date, regardless of deposit/maturity date) ──
-    if category in (None, '', '現金股利'):
-        q = CashDividend.query
-        if entity:
-            q = q.filter_by(entity=entity)
-        if broker:
-            q = q.filter_by(broker=broker)
-        for cd in q.order_by(CashDividend.announce_date).all():
-            rows.append({
-                'date':            cd.announce_date.isoformat() if cd.announce_date else None,
-                'entity':          cd.entity,
-                'broker':          cd.broker,
-                'category':        '現金股利',
-                'security_code':   cd.security_code,
-                'security_name':   cd.security.name if cd.security else cd.security_code,
-                'shares':          cd.shares_held,
-                'price':           cd.dividend_per_share,
-                'gross_amount':    cd.total_amount,
-                'fee':             None,
-                'tax':             None,
-                'net_amount':      cd.total_amount,
-                'avg_cost':        None,
-                'cost_basis':      None,
-                'realized_pnl':    cd.total_amount,
-                'note':            '待入帳' if not cd.deposited else None,
-            })
-
-    # ── 貨幣基金 (non-stock PNL transactions imported from ledger) ─────────────
+    # ── 2. 貨幣基金收益 / 非股票損益 ─────────────────────────────────────────
     if category in (None, '', '貨幣基金'):
         q = (Transaction.query
              .filter(Transaction.security_code.is_(None))
              .filter(Transaction.memo == '非股票損益'))
-        if entity:
-            q = q.filter_by(entity=entity)
-        if broker:
-            q = q.filter_by(broker=broker)
+        if entity: q = q.filter_by(entity=entity)
+        if broker: q = q.filter_by(broker=broker)
         for t in q.order_by(Transaction.trade_date).all():
             rows.append({
-                'date':            t.trade_date.isoformat() if t.trade_date else None,
-                'entity':          t.entity,
-                'broker':          t.broker,
-                'category':        '貨幣基金',
-                'security_code':   None,
-                'security_name':   t.security_name or '貨幣基金收益',
-                'shares':          None,
-                'price':           None,
-                'gross_amount':    t.net_amount,
-                'fee':             None,
-                'tax':             None,
-                'net_amount':      t.net_amount,
-                'avg_cost':        None,
-                'cost_basis':      None,
-                'realized_pnl':    t.net_amount,
-                'note':            None,
+                'date':          t.trade_date.isoformat() if t.trade_date else None,
+                'entity':        t.entity,
+                'broker':        t.broker,
+                'category':      '貨幣基金',
+                'security_code': None,
+                'security_name': t.security_name or '貨幣基金收益',
+                'shares':        None,
+                'price':         None,
+                'gross_amount':  t.net_amount,
+                'fee':           None,
+                'tax':           None,
+                'net_amount':    t.net_amount,
+                'avg_cost':      None,
+                'cost_basis':    None,
+                'realized_pnl':  t.net_amount,
+                'note':          None,
             })
 
-    # ── 貨幣基金 (申購/贖回利息) — not yet modeled as its own entry type ──
-    # Placeholder: returns nothing for this category until a dedicated
-    # CASH_ENTRY_TYPES entry (e.g. '基金獲利') exists to source this from.
+    # ── 3. 現金股利 (recognised on announce_date) ─────────────────────────────
+    if category in (None, '', '現金股利'):
+        q = CashDividend.query.filter_by(deposited=True)
+        if entity: q = q.filter_by(entity=entity)
+        if broker: q = q.filter_by(broker=broker)
+        for cd in q.order_by(CashDividend.announce_date).all():
+            rows.append({
+                'date':          cd.announce_date.isoformat() if cd.announce_date else None,
+                'entity':        cd.entity,
+                'broker':        cd.broker,
+                'category':      '現金股利',
+                'security_code': cd.security_code,
+                'security_name': cd.security.name if cd.security else cd.security_code,
+                'shares':        cd.shares_held,
+                'price':         cd.dividend_per_share,
+                'gross_amount':  cd.total_amount,
+                'fee':           None,
+                'tax':           None,
+                'net_amount':    cd.total_amount,
+                'avg_cost':      None,
+                'cost_basis':    None,
+                'realized_pnl':  cd.total_amount,
+                'note':          '待入帳' if not cd.deposited else None,
+            })
 
     rows.sort(key=lambda r: r['date'] or '')
     return rows
-
-
-# ── Foreign investment stubs ──────────────────────────────────────────────────
-# These functions support the 海外投資 module in app.py.
-# Defined here to satisfy imports; full implementation lives in app.py routes.
-
-def recalculate_foreign_positions(entity: str = None):
-    """Recalculate foreign stock positions from ForeignTransaction history."""
-    from .models import db, ForeignTransaction, ForeignPosition
-    entities = [entity] if entity else ['私銀RC', '私銀華強', 'Renowned', 'KGI']
-    for ent in entities:
-        try:
-            txns = (ForeignTransaction.query
-                    .filter_by(entity=ent)
-                    .filter(ForeignTransaction.security_code.isnot(None))
-                    .order_by(ForeignTransaction.trade_date)
-                    .all())
-            holdings = {}
-            for t in txns:
-                code = t.security_code
-                if code not in holdings:
-                    holdings[code] = {'shares': 0.0, 'total_cost_usd': 0.0}
-                if t.shares > 0:
-                    holdings[code]['shares']         += t.shares
-                    holdings[code]['total_cost_usd'] += t.cost_usd or 0
-                else:
-                    if holdings[code]['shares'] > 0:
-                        sell_qty = abs(t.shares)
-                        avg      = holdings[code]['total_cost_usd'] / holdings[code]['shares']
-                        holdings[code]['shares']         -= sell_qty
-                        holdings[code]['total_cost_usd'] -= avg * sell_qty
-                        if holdings[code]['shares'] < 0.001:
-                            holdings[code]['shares']         = 0
-                            holdings[code]['total_cost_usd'] = 0
-            for code, data in holdings.items():
-                if data['shares'] < 0.001:
-                    continue
-                pos = ForeignPosition.query.filter_by(entity=ent, security_code=code).first()
-                if pos is None:
-                    pos = ForeignPosition(entity=ent, security_code=code)
-                    db.session.add(pos)
-                pos.shares         = round(data['shares'], 4)
-                pos.total_cost_usd = round(data['total_cost_usd'], 4)
-                pos.avg_cost_usd   = round(data['total_cost_usd'] / data['shares'], 4) if data['shares'] > 0 else 0
-            for zp in ForeignPosition.query.filter_by(entity=ent).filter(ForeignPosition.shares <= 0).all():
-                db.session.delete(zp)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-
-def calculate_foreign_realized_pnl(entity: str = None):
-    """Calculate realized P&L for foreign investments."""
-    from .models import ForeignTransaction, ACCOUNT_MAP
-    entities = [entity] if entity else ['私銀RC', '私銀華強', 'Renowned', 'KGI']
-    result = {}
-    for ent in entities:
-        try:
-            txns = (ForeignTransaction.query
-                    .filter_by(entity=ent)
-                    .filter(ForeignTransaction.security_code.isnot(None))
-                    .order_by(ForeignTransaction.trade_date)
-                    .all())
-            holdings = {}
-            realized = 0.0
-            for t in txns:
-                code = t.security_code
-                if code not in holdings:
-                    holdings[code] = {'shares': 0.0, 'total_cost_usd': 0.0}
-                if t.shares > 0:
-                    holdings[code]['shares']         += t.shares
-                    holdings[code]['total_cost_usd'] += t.cost_usd or 0
-                else:
-                    if holdings[code]['shares'] > 0:
-                        sell_qty   = abs(t.shares)
-                        avg        = holdings[code]['total_cost_usd'] / holdings[code]['shares']
-                        cost_basis = avg * sell_qty
-                        realized  += (t.proceeds_usd or 0) - cost_basis
-                        holdings[code]['shares']         -= sell_qty
-                        holdings[code]['total_cost_usd'] -= avg * sell_qty
-                        if holdings[code]['shares'] < 0.001:
-                            holdings[code]['shares']         = 0
-                            holdings[code]['total_cost_usd'] = 0
-            result[ent] = round(realized, 2)
-        except Exception:
-            result[ent] = 0.0
-    return result
-
-
-def get_latest_fx_rate(currency: str = 'USD') -> float:
-    """Return the latest FX rate for a given currency vs TWD."""
-    from .models import FxRate
-    try:
-        rate = (FxRate.query
-                .filter_by(currency=currency)
-                .order_by(FxRate.rate_date.desc())
-                .first())
-        return rate.rate if rate else 30.0
-    except Exception:
-        return 30.0
