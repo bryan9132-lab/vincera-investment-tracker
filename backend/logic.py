@@ -229,6 +229,18 @@ def calculate_realized_pnl(entity: str = None):
                         holdings[code]['shares']     = 0
                         holdings[code]['total_cost'] = 0
 
+        # Include manual adjustments so 庫存總表 matches 已實現損益 tab:
+        # - Edit adjustments (transaction_id set): add the delta (corrected - original)
+        # - New entry adjustments (no transaction_id): add the full amount
+        from .models import PnlAdjustment
+        for adj in PnlAdjustment.query.filter_by(entity=ent).all():
+            if adj.transaction_id is not None:
+                # Edit: only add the delta, not the full amount (original already counted above)
+                realized += adj.realized_pnl - (adj.original_pnl or 0)
+            else:
+                # New entry: add full amount
+                realized += adj.realized_pnl
+
         result[ent] = round(realized, 0)
 
     return result
@@ -288,6 +300,7 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                             'realized_pnl':  round(realized, 0),
                             'note':          None,
                             'adjustment_id': None,
+                            'transaction_id': t.id,   # exposes DB id for edit overrides
                         })
                         holdings[code]['shares']     -= sell_qty
                         holdings[code]['total_cost'] -= avg_cost * sell_qty
@@ -349,9 +362,26 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                 'adjustment_id': None,
             })
 
-    # ── 4. Manual adjustments (Sophie's corrections) ─────────────────────────
+    # ── 4. Apply edit overrides and add new-entry adjustments ────────────────
     from .models import PnlAdjustment
-    adj_q = PnlAdjustment.query
+
+    # Build override map: transaction_id → PnlAdjustment (edit type)
+    overrides = {
+        adj.transaction_id: adj
+        for adj in PnlAdjustment.query.filter(PnlAdjustment.transaction_id.isnot(None)).all()
+    }
+
+    # Apply overrides to computed rows
+    for row in rows:
+        txn_id = row.get('transaction_id')
+        if txn_id and txn_id in overrides:
+            adj = overrides[txn_id]
+            row['realized_pnl']  = adj.realized_pnl
+            row['adjustment_id'] = adj.id        # marks row as edited
+            row['note']          = (adj.note or '') + f' [原始: {round(adj.original_pnl or 0):,}]'
+
+    # Add new-entry adjustments (no transaction_id) as separate rows
+    adj_q = PnlAdjustment.query.filter(PnlAdjustment.transaction_id.is_(None))
     if entity:   adj_q = adj_q.filter_by(entity=entity)
     if broker:   adj_q = adj_q.filter_by(broker=broker)
     for adj in adj_q.order_by(PnlAdjustment.date).all():

@@ -310,9 +310,11 @@ def create_app():
             category      = data.get('category', '手動調整'),
             security_code = data.get('security_code') or None,
             security_name = data.get('security_name') or None,
-            net_amount    = float(data['net_amount'])  if data.get('net_amount')  is not None else None,
-            cost_basis    = float(data['cost_basis'])  if data.get('cost_basis')  is not None else None,
+            net_amount    = float(data['net_amount'])   if data.get('net_amount')   is not None else None,
+            cost_basis    = float(data['cost_basis'])   if data.get('cost_basis')   is not None else None,
             realized_pnl  = float(data['realized_pnl']),
+            original_pnl  = float(data['original_pnl']) if data.get('original_pnl') is not None else None,
+            transaction_id= int(data['transaction_id']) if data.get('transaction_id') else None,
             note          = data.get('note') or None,
         )
         db.session.add(adj)
@@ -1988,7 +1990,7 @@ def _migrate_add_price_type():
 
 
 def _migrate_add_pnl_adjustments():
-    """Create pnl_adjustments table if it doesn't exist yet."""
+    """Create pnl_adjustments table and ensure all columns exist."""
     try:
         db.session.execute(db.text("""
             CREATE TABLE IF NOT EXISTS pnl_adjustments (
@@ -2002,10 +2004,18 @@ def _migrate_add_pnl_adjustments():
                 net_amount     FLOAT,
                 cost_basis     FLOAT,
                 realized_pnl   FLOAT NOT NULL,
+                original_pnl   FLOAT,
+                transaction_id INTEGER,
                 note           VARCHAR(200),
                 created_at     TIMESTAMP DEFAULT NOW()
             )
         """))
+        # Add columns if upgrading from earlier version
+        for col_def in [
+            "ALTER TABLE pnl_adjustments ADD COLUMN IF NOT EXISTS original_pnl FLOAT",
+            "ALTER TABLE pnl_adjustments ADD COLUMN IF NOT EXISTS transaction_id INTEGER",
+        ]:
+            db.session.execute(db.text(col_def))
         db.session.commit()
     except Exception:
         db.session.rollback()

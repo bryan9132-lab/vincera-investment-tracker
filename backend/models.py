@@ -521,7 +521,9 @@ class PnlAdjustment(db.Model):
     security_name  = db.Column(db.String(100),nullable=True)
     net_amount     = db.Column(db.Float,      nullable=True)
     cost_basis     = db.Column(db.Float,      nullable=True)
-    realized_pnl   = db.Column(db.Float,      nullable=False)
+    realized_pnl   = db.Column(db.Float,      nullable=False)  # corrected value (edit) or full amount (new)
+    original_pnl   = db.Column(db.Float,      nullable=True)   # system-computed value before edit (edit only)
+    transaction_id = db.Column(db.Integer,    nullable=True)    # FK to transactions.id (edit only; None for new entries)
     note           = db.Column(db.String(200),nullable=True)
     created_at     = db.Column(db.DateTime,   default=datetime.utcnow)
 
@@ -543,6 +545,8 @@ class PnlAdjustment(db.Model):
             'avg_cost':      None,
             'cost_basis':    self.cost_basis,
             'realized_pnl':  self.realized_pnl,
+            'original_pnl':  self.original_pnl,
+            'transaction_id': self.transaction_id,
             'note':          self.note,
             'adjustment_id': self.id,
         }

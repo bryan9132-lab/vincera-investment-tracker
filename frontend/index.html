@@ -2354,11 +2354,18 @@ function renderRealizedPnl(rows) {
     const pnl    = r.realized_pnl ?? 0;
     const pnlCls = pnl < 0 ? 'negative' : 'positive';
     const noteTag = r.note ? `<span style="font-size:10px;color:var(--muted)">${r.note}</span>` : '—';
-    const isAdj  = r.adjustment_id != null;
-    const actions = isAdj
-      ? `<button class="btn btn-ghost btn-sm" onclick='editPnlAdj(${JSON.stringify(r).replace(/'/g,"&#39;")})'>✏</button>
-         <button class="btn btn-danger btn-sm" onclick="deletePnlAdj(${r.adjustment_id})" style="margin-left:4px">🗑</button>`
-      : '—';
+    const isAdj     = r.adjustment_id != null;
+    const isEdited  = isAdj && r.transaction_id != null;   // edit override on computed row
+    const isNewEntry= isAdj && r.transaction_id == null;   // standalone new entry
+    let actions;
+    if(isEdited || isNewEntry) {
+      // Adjustment rows: show edit + delete
+      actions = `<button class="btn btn-ghost btn-sm" onclick='openPnlAdjModal(${JSON.stringify(r).replace(/'/g,"&#39;")})' title="編輯">✏</button>
+                 <button class="btn btn-danger btn-sm" onclick="deletePnlAdj(${r.adjustment_id})" style="margin-left:4px" title="刪除">🗑</button>`;
+    } else {
+      // Computed rows: show edit button to create an override
+      actions = `<button class="btn btn-ghost btn-sm" onclick='editComputedPnl(${JSON.stringify(r).replace(/'/g,"&#39;")})' title="修正此筆損益">✏</button>`;
+    }
     return `<tr style="${isAdj ? 'background:rgba(168,85,247,0.05)' : ''}">
       <td class="left">${r.date || '—'}</td>
       <td class="left">${r.entity || '—'}</td>
@@ -2378,48 +2385,76 @@ function renderRealizedPnl(rows) {
   }).join('');
 }
 // ── 已實現損益 手動調整 ────────────────────────────────────────────────────────
+function editComputedPnl(r) {
+  // Opens modal to override a system-computed sell row
+  document.querySelector('#pnl-adj-modal .modal-title').textContent = '修正已實現損益';
+  document.getElementById('pnl-adj-id').value            = '';
+  document.getElementById('pnl-adj-txn-id').value        = r.transaction_id || '';
+  document.getElementById('pnl-adj-original').value      = r.realized_pnl || '';
+  document.getElementById('pnl-adj-date').value          = r.date || '';
+  document.getElementById('pnl-adj-entity').value        = r.entity || 'RC';
+  document.getElementById('pnl-adj-broker').value        = r.broker || '統一';
+  document.getElementById('pnl-adj-code').value          = r.security_code || '';
+  document.getElementById('pnl-adj-name').value          = r.security_name || '';
+  document.getElementById('pnl-adj-net').value           = r.net_amount != null ? Math.round(r.net_amount) : '';
+  document.getElementById('pnl-adj-cost').value          = r.cost_basis != null ? Math.round(r.cost_basis) : '';
+  document.getElementById('pnl-adj-pnl').value           = r.realized_pnl != null ? Math.round(r.realized_pnl) : '';
+  document.getElementById('pnl-adj-note').value          = '';
+  // Show original value for reference
+  document.getElementById('pnl-adj-original-row').style.display = 'block';
+  document.getElementById('pnl-adj-original-display').textContent = r.realized_pnl != null ? fmt(Math.round(r.realized_pnl)) : '—';
+  document.getElementById('pnl-adj-modal').style.display = 'flex';
+}
+
 function openPnlAdjModal(r) {
   const isEdit = r && r.adjustment_id != null;
-  document.querySelector('#pnl-adj-modal .modal-title').textContent = isEdit ? '編輯手動調整' : '新增手動調整';
-  document.getElementById('pnl-adj-id').value          = isEdit ? r.adjustment_id : '';
-  document.getElementById('pnl-adj-date').value         = r?.date || new Date().toISOString().slice(0,10);
-  document.getElementById('pnl-adj-entity').value       = r?.entity || 'RC';
-  document.getElementById('pnl-adj-broker').value       = r?.broker || '統一';
-  document.getElementById('pnl-adj-code').value         = r?.security_code || '';
-  document.getElementById('pnl-adj-name').value         = r?.security_name || '';
-  document.getElementById('pnl-adj-net').value          = r?.net_amount != null ? Math.round(r.net_amount) : '';
-  document.getElementById('pnl-adj-cost').value         = r?.cost_basis != null ? Math.round(r.cost_basis) : '';
-  document.getElementById('pnl-adj-pnl').value          = r?.realized_pnl != null ? Math.round(r.realized_pnl) : '';
-  document.getElementById('pnl-adj-note').value         = r?.note || '';
+  document.querySelector('#pnl-adj-modal .modal-title').textContent = isEdit ? '編輯手動調整' : '新增調整';
+  document.getElementById('pnl-adj-id').value            = isEdit ? r.adjustment_id : '';
+  document.getElementById('pnl-adj-txn-id').value        = '';
+  document.getElementById('pnl-adj-original').value      = '';
+  document.getElementById('pnl-adj-date').value          = r?.date || new Date().toISOString().slice(0,10);
+  document.getElementById('pnl-adj-entity').value        = r?.entity || 'RC';
+  document.getElementById('pnl-adj-broker').value        = r?.broker || '統一';
+  document.getElementById('pnl-adj-code').value          = r?.security_code || '';
+  document.getElementById('pnl-adj-name').value          = r?.security_name || '';
+  document.getElementById('pnl-adj-net').value           = r?.net_amount != null ? Math.round(r.net_amount) : '';
+  document.getElementById('pnl-adj-cost').value          = r?.cost_basis != null ? Math.round(r.cost_basis) : '';
+  document.getElementById('pnl-adj-pnl').value           = r?.realized_pnl != null ? Math.round(r.realized_pnl) : '';
+  document.getElementById('pnl-adj-note').value          = r?.note || '';
+  document.getElementById('pnl-adj-original-row').style.display = 'none';
   document.getElementById('pnl-adj-modal').style.display = 'flex';
 }
 function editPnlAdj(r) { openPnlAdjModal(r); }
 function closePnlAdjModal() { document.getElementById('pnl-adj-modal').style.display = 'none'; }
 
 async function submitPnlAdj() {
-  const id   = document.getElementById('pnl-adj-id').value;
-  const pnl  = document.getElementById('pnl-adj-pnl').value;
+  const id     = document.getElementById('pnl-adj-id').value;
+  const txnId  = document.getElementById('pnl-adj-txn-id').value;
+  const origPnl= document.getElementById('pnl-adj-original').value;
+  const pnl    = document.getElementById('pnl-adj-pnl').value;
   if(!pnl) { toast('請填已實現損益金額', 'error'); return; }
   const body = {
-    date:          document.getElementById('pnl-adj-date').value,
-    entity:        document.getElementById('pnl-adj-entity').value,
-    broker:        document.getElementById('pnl-adj-broker').value,
-    security_code: document.getElementById('pnl-adj-code').value.trim() || null,
-    security_name: document.getElementById('pnl-adj-name').value.trim() || null,
-    net_amount:    document.getElementById('pnl-adj-net').value  || null,
-    cost_basis:    document.getElementById('pnl-adj-cost').value || null,
-    realized_pnl:  pnl,
-    note:          document.getElementById('pnl-adj-note').value.trim() || null,
+    date:           document.getElementById('pnl-adj-date').value,
+    entity:         document.getElementById('pnl-adj-entity').value,
+    broker:         document.getElementById('pnl-adj-broker').value,
+    security_code:  document.getElementById('pnl-adj-code').value.trim() || null,
+    security_name:  document.getElementById('pnl-adj-name').value.trim() || null,
+    net_amount:     document.getElementById('pnl-adj-net').value  || null,
+    cost_basis:     document.getElementById('pnl-adj-cost').value || null,
+    realized_pnl:   pnl,
+    original_pnl:   origPnl || null,
+    transaction_id: txnId   || null,
+    note:           document.getElementById('pnl-adj-note').value.trim() || null,
   };
   const url    = id ? `${API}/api/pnl_adjustments/${id}` : `${API}/api/pnl_adjustments`;
   const method = id ? 'PUT' : 'POST';
   const res    = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  if(res.ok) { toast(id ? '✅ 已更新' : '✅ 已新增', 'success'); closePnlAdjModal(); loadRealizedPnl(); }
+  if(res.ok) { toast(id ? '✅ 已更新' : '✅ 已儲存', 'success'); closePnlAdjModal(); loadRealizedPnl(); }
   else { const e = await res.json(); toast(`❌ ${e.error||'錯誤'}`, 'error'); }
 }
 
 async function deletePnlAdj(id) {
-  if(!confirm('確定刪除此手動調整？')) return;
+  if(!confirm('確定刪除此調整？')) return;
   const res = await fetch(`${API}/api/pnl_adjustments/${id}`, { method:'DELETE' });
   if(res.ok) { toast('✅ 已刪除', 'success'); loadRealizedPnl(); }
   else { const e = await res.json(); toast(`❌ ${e.error}`, 'error'); }
@@ -2430,6 +2465,12 @@ async function deletePnlAdj(id) {
 <div class="modal-overlay" id="pnl-adj-modal" style="display:none" onclick="if(event.target.id==='pnl-adj-modal')closePnlAdjModal()">
   <div class="modal" onclick="event.stopPropagation()" style="width:500px">
     <div class="modal-title">新增手動調整</div>
+    <input type="hidden" id="pnl-adj-id">
+    <input type="hidden" id="pnl-adj-txn-id">
+    <input type="hidden" id="pnl-adj-original">
+    <div id="pnl-adj-original-row" style="display:none;background:var(--surface2);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+      系統計算原始值：<strong id="pnl-adj-original-display" style="color:var(--text)">—</strong>　→　請在下方填入正確金額
+    </div>
     <div class="modal-row">
       <div class="modal-field"><label>日期</label><input type="date" id="pnl-adj-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px"></div>
       <div class="modal-field"><label>帳戶</label>
