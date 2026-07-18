@@ -185,7 +185,6 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
     <div class="tab" onclick="switchTab('cashsummary')">💰 資金總表</div>
     <div class="tab" onclick="switchTab('cashledger')">📒 資金細項</div>
     <div class="tab" onclick="switchTab('dividends')">🎁 股利管理</div>
-    <div class="tab" onclick="switchTab('realizedpnl')">📈 已實現損益</div>
   </div>
 
   <!-- ── Tab: Holdings ── -->
@@ -513,56 +512,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
   </div>
 </div>
 
-<!-- ── Tab: 已實現損益 (read-only) ── -->
-<div class="tab-panel" id="tab-realizedpnl">
-  <div class="toolbar">
-    <div class="toolbar-left">
-      <select id="rpnl-entity" class="filter-select" onchange="loadRealizedPnl()">
-        <option value="">全部帳戶</option>
-        <option>RC</option><option>華強</option><option>私銀RC</option><option>私銀華強</option>
-      </select>
-      <select id="rpnl-broker" class="filter-select" onchange="loadRealizedPnl()">
-        <option value="">全部券商</option>
-        <option>統一</option><option>元大</option><option>國泰</option>
-      </select>
-      <select id="rpnl-category" class="filter-select" onchange="loadRealizedPnl()">
-        <option value="">全部類別</option>
-        <option value="股票買賣">股票買賣</option>
-        <option value="貨幣基金">貨幣基金</option>
-        <option value="現金股利">現金股利</option>
-      </select>
-      <select id="rpnl-month" class="filter-select" onchange="loadRealizedPnl()">
-        <option value="">全部月份</option>
-      </select>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="font-size:12px;color:var(--muted)" id="rpnl-summary"></div>
-      <button class="btn btn-primary btn-sm" onclick="openPnlAdjModal()">＋ 新增調整</button>
-      <button class="btn btn-success btn-sm" onclick="exportRealizedPnlExcel()">⬇ 匯出 Excel</button>
-    </div>
-  </div>
-  <div class="card" style="padding:0;overflow:hidden">
-    <table>
-      <thead><tr>
-        <th class="left">日期</th>
-        <th class="left">帳戶</th>
-        <th class="left">券商</th>
-        <th class="left">類別</th>
-        <th class="left">代號</th>
-        <th class="left">名稱</th>
-        <th>股數</th>
-        <th>單價</th>
-        <th>淨收付</th>
-        <th>平均成本</th>
-        <th>成本基礎</th>
-        <th>已實現損益</th>
-        <th class="left">備註</th>
-        <th class="left">操作</th>
-      </tr></thead>
-      <tbody id="rpnl-body"></tbody>
-    </table>
-  </div>
-</div> -->
+<!-- ── Audit Log Modal ── -->
 <div class="modal-overlay" id="audit-modal" style="display:none" onclick="if(event.target.id==='audit-modal')closeAuditModal()">
   <div class="modal" onclick="event.stopPropagation()" style="width:680px;max-height:80vh;display:flex;flex-direction:column">
     <div class="modal-title">📋 操作記錄</div>
@@ -597,6 +547,7 @@ select.filter-select{background:var(--surface2);color:var(--text);border:1px sol
         <select id="ce-type" class="filter-select" style="width:100%" onchange="onCashEntryTypeChange()">
           <option value="其他收入">其他收入</option>
           <option value="其他支出">其他支出</option>
+          <option value="未上市股利收入">未上市股利收入</option>
           <option value="轉出賬戶">轉出賬戶</option>
           <option value="股東往來（借）">股東往來（借）</option>
           <option value="股東往來（還）">股東往來（還）</option>
@@ -841,7 +792,7 @@ document.getElementById('header-date').textContent =
   new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
 function switchTab(name) {
-  const names = ['holdings','upload','history','cashsummary','cashledger','dividends','realizedpnl'];
+  const names = ['holdings','upload','history','cashsummary','cashledger','dividends'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -850,7 +801,6 @@ function switchTab(name) {
   if(name==='cashsummary') loadCashSummary();
   if(name==='cashledger')  loadCashLedger();
   if(name==='dividends')   loadDividends();
-  if(name==='realizedpnl') loadRealizedPnl();
 }
 
 // ── Holdings ──────────────────────────────────────────────────────────────────
@@ -1604,8 +1554,7 @@ async function loadCashLedger() {
     // Account header (only for single account)
     if(acct) {
       document.getElementById('ledger-account-header').style.display = 'block';
-      const entityTag = acct.entity ? `<span class="tag tag-blue" style="font-size:11px;margin-right:6px">${acct.entity}</span>` : '';
-      document.getElementById('ledger-acct-name').innerHTML = entityTag + acct.name;
+      document.getElementById('ledger-acct-name').textContent    = acct.name;
       document.getElementById('ledger-acct-balance').textContent = fmt(Math.round(acct.balance||0));
     } else {
       document.getElementById('ledger-account-header').style.display = 'none';
@@ -1649,10 +1598,9 @@ function renderLedgerTable(entries) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>`;
     return;
   }
-  // Build account name + entity lookup
-  const acctName   = {};
-  const acctEntity = {};
-  allCashAccounts.forEach(a => { acctName[a.id] = a.name; acctEntity[a.id] = a.entity; });
+  // Build account name lookup
+  const acctName = {};
+  allCashAccounts.forEach(a => acctName[a.id] = a.name);
 
   tbody.innerHTML = entries.map(e => {
     const isIn    = e.amount >= 0;
@@ -1669,9 +1617,7 @@ function renderLedgerTable(entries) {
       counterpartEntityLabel = `<span style="font-size:10px;font-weight:600;color:var(--accent);margin-left:4px">[${entityMatch[2]}]</span>`;
       desc = desc.replace(/^\[[^\]]+→[^\]]+\]\s*/, '') || '—';
     }
-    const entity   = acctEntity[e.account_id] || '';
-    const entityBadge = entity ? `<span class="tag tag-blue" style="font-size:10px;margin-right:4px">${entity}</span>` : '';
-    const acctCell = entityBadge + (acctName[e.account_id] || e.account_id) + entityLabel;
+    const acctCell = (acctName[e.account_id] || e.account_id) + entityLabel;
 
     // 對方帳戶: find mirror entry's account
     let counterpart = '—';
@@ -1782,7 +1728,7 @@ function onCashEntryTypeChange() {
     amtLabel.textContent = '金額（請填正數，系統自動處理方向）';
     amtInput.placeholder = 'e.g. 500000';
     amtInput.min = '0';
-  } else if(type === '其他收入' || type === '貸款') {
+  } else if(type === '其他收入' || type === '貸款' || type === '未上市股利收入') {
     amtLabel.textContent = '金額（請填正數）';
     amtInput.placeholder = 'e.g. 500000';
     amtInput.min = '0';
@@ -2265,242 +2211,7 @@ async function allocateStockDividend(id) {
   if (res.ok) { toast('✅ 已入集保，庫存已更新', 'success'); loadDividends(); loadHoldings(); }
   else { const err = await res.json(); toast(`❌ ${err.error}`, 'error'); }
 }
-// ── 已實現損益 Ledger (read-only) ─────────────────────────────────────────────
-let _allRpnlRows = [];  // cache for month filter + export
-
-async function loadRealizedPnl() {
-  const entity   = document.getElementById('rpnl-entity')?.value || '';
-  const broker   = document.getElementById('rpnl-broker')?.value || '';
-  const category = document.getElementById('rpnl-category')?.value || '';
-  const month    = document.getElementById('rpnl-month')?.value || '';
-  let url = `${API}/api/realized_pnl_ledger?`;
-  if(entity)   url += `&entity=${encodeURIComponent(entity)}`;
-  if(broker)   url += `&broker=${encodeURIComponent(broker)}`;
-  if(category) url += `&category=${encodeURIComponent(category)}`;
-  try {
-    const res  = await fetch(url);
-    const rows = await res.json();
-    _allRpnlRows = rows;
-
-    // Populate month dropdown from actual data
-    const monthSel = document.getElementById('rpnl-month');
-    const months   = [...new Set(rows.map(r => (r.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
-    const curMonth = monthSel.value;
-    monthSel.innerHTML = '<option value="">全部月份</option>' +
-      months.map(m => `<option value="${m}" ${m===curMonth?'selected':''}>${m}</option>`).join('');
-
-    // Apply month filter client-side
-    const filtered = month ? rows.filter(r => (r.date||'').startsWith(month)) : rows;
-    const total = filtered.reduce((s,r) => s + (r.realized_pnl || 0), 0);
-    const clr   = total >= 0 ? 'var(--positive)' : 'var(--negative)';
-    document.getElementById('rpnl-summary').innerHTML =
-      `共 ${filtered.length} 筆　合計：<span style="color:${clr};font-weight:700">${fmt(Math.round(total))}</span>`;
-    renderRealizedPnl(filtered);
-  } catch(e) {
-    document.getElementById('rpnl-body').innerHTML =
-      '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:32px">載入失敗</td></tr>';
-  }
-}
-
-function exportRealizedPnlExcel() {
-  const month    = document.getElementById('rpnl-month')?.value || '';
-  const entity   = document.getElementById('rpnl-entity')?.value || '';
-  const broker   = document.getElementById('rpnl-broker')?.value || '';
-  const category = document.getElementById('rpnl-category')?.value || '';
-  const rows = month ? _allRpnlRows.filter(r => (r.date||'').startsWith(month)) : _allRpnlRows;
-  if(!rows.length){ toast('沒有資料可匯出','error'); return; }
-
-  // Build CSV (Excel-compatible UTF-8 with BOM)
-  const headers = ['日期','帳戶','券商','類別','代號','名稱','股數','單價','淨收付','平均成本','成本基礎','已實現損益','備註'];
-  const escape  = v => v == null ? '' : `"${String(v).replace(/"/g,'""')}"`;
-  const lines   = [
-    headers.join(','),
-    ...rows.map(r => [
-      r.date, r.entity, r.broker, r.category,
-      r.security_code, r.security_name,
-      r.shares != null ? r.shares : '',
-      r.price  != null ? r.price  : '',
-      r.net_amount  != null ? Math.round(r.net_amount)  : '',
-      r.avg_cost    != null ? r.avg_cost.toFixed(4)     : '',
-      r.cost_basis  != null ? Math.round(r.cost_basis)  : '',
-      r.realized_pnl != null ? Math.round(r.realized_pnl) : '',
-      r.note || '',
-    ].map(escape).join(','))
-  ];
-  const bom  = '\uFEFF';
-  const blob = new Blob([bom + lines.join('\n')], {type:'text/csv;charset=utf-8'});
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement('a'), {href:url});
-  const suffix = [entity,broker,category,month].filter(Boolean).join('_') || '全部';
-  a.download = `已實現損益_${suffix}_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function renderRealizedPnl(rows) {
-  const tbody = document.getElementById('rpnl-body');
-  if(!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:32px">無記錄</td></tr>';
-    return;
-  }
-  const catBadge = c => {
-    if(c==='股票買賣') return `<span class="tag tag-blue"  style="font-size:10px">${c}</span>`;
-    if(c==='現金股利') return `<span class="tag tag-green" style="font-size:10px">${c}</span>`;
-    if(c==='貨幣基金') return `<span class="tag" style="background:#f0a50022;color:#f0a500;font-size:10px">${c}</span>`;
-    if(c==='手動調整') return `<span class="tag" style="background:#a855f722;color:#a855f7;font-size:10px">✏ 手動調整</span>`;
-    return `<span class="tag" style="font-size:10px">${c||''}</span>`;
-  };
-  tbody.innerHTML = rows.map(r => {
-    const pnl    = r.realized_pnl ?? 0;
-    const pnlCls = pnl < 0 ? 'negative' : 'positive';
-    const noteTag = r.note ? `<span style="font-size:10px;color:var(--muted)">${r.note}</span>` : '—';
-    const isAdj     = r.adjustment_id != null;
-    const isEdited  = isAdj && r.transaction_id != null;   // edit override on computed row
-    const isNewEntry= isAdj && r.transaction_id == null;   // standalone new entry
-    let actions;
-    if(isEdited || isNewEntry) {
-      // Adjustment rows: show edit + delete
-      actions = `<button class="btn btn-ghost btn-sm" onclick='openPnlAdjModal(${JSON.stringify(r).replace(/'/g,"&#39;")})' title="編輯">✏</button>
-                 <button class="btn btn-danger btn-sm" onclick="deletePnlAdj(${r.adjustment_id})" style="margin-left:4px" title="刪除">🗑</button>`;
-    } else {
-      // Computed rows: show edit button to create an override
-      actions = `<button class="btn btn-ghost btn-sm" onclick='editComputedPnl(${JSON.stringify(r).replace(/'/g,"&#39;")})' title="修正此筆損益">✏</button>`;
-    }
-    return `<tr style="${isAdj ? 'background:rgba(168,85,247,0.05)' : ''}">
-      <td class="left">${r.date || '—'}</td>
-      <td class="left">${r.entity || '—'}</td>
-      <td class="left">${r.broker || '—'}</td>
-      <td class="left">${catBadge(r.category)}</td>
-      <td class="left">${r.security_code || '—'}</td>
-      <td class="left">${r.security_name || '—'}</td>
-      <td>${r.shares != null ? Number(r.shares/1000).toFixed(3).replace(/\.?0+$/,'')+'張' : '—'}</td>
-      <td>${r.price    != null ? r.price.toLocaleString()    : '—'}</td>
-      <td>${r.net_amount  != null ? fmt(Math.round(r.net_amount))  : '—'}</td>
-      <td>${r.avg_cost    != null ? r.avg_cost.toFixed(2)          : '—'}</td>
-      <td>${r.cost_basis  != null ? fmt(Math.round(r.cost_basis))  : '—'}</td>
-      <td class="${pnlCls}" style="font-weight:600">${fmt(Math.round(pnl))}</td>
-      <td class="left">${noteTag}</td>
-      <td class="left" style="white-space:nowrap">${actions}</td>
-    </tr>`;
-  }).join('');
-}
-// ── 已實現損益 手動調整 ────────────────────────────────────────────────────────
-function editComputedPnl(r) {
-  // Opens modal to override a system-computed sell row
-  document.querySelector('#pnl-adj-modal .modal-title').textContent = '修正已實現損益';
-  document.getElementById('pnl-adj-id').value            = '';
-  document.getElementById('pnl-adj-txn-id').value        = r.transaction_id || '';
-  document.getElementById('pnl-adj-original').value      = r.realized_pnl || '';
-  document.getElementById('pnl-adj-date').value          = r.date || '';
-  document.getElementById('pnl-adj-entity').value        = r.entity || 'RC';
-  document.getElementById('pnl-adj-broker').value        = r.broker || '統一';
-  document.getElementById('pnl-adj-code').value          = r.security_code || '';
-  document.getElementById('pnl-adj-name').value          = r.security_name || '';
-  document.getElementById('pnl-adj-net').value           = r.net_amount != null ? Math.round(r.net_amount) : '';
-  document.getElementById('pnl-adj-cost').value          = r.cost_basis != null ? Math.round(r.cost_basis) : '';
-  document.getElementById('pnl-adj-pnl').value           = r.realized_pnl != null ? Math.round(r.realized_pnl) : '';
-  document.getElementById('pnl-adj-note').value          = '';
-  // Show original value for reference
-  document.getElementById('pnl-adj-original-row').style.display = 'block';
-  document.getElementById('pnl-adj-original-display').textContent = r.realized_pnl != null ? fmt(Math.round(r.realized_pnl)) : '—';
-  document.getElementById('pnl-adj-modal').style.display = 'flex';
-}
-
-function openPnlAdjModal(r) {
-  const isEdit = r && r.adjustment_id != null;
-  document.querySelector('#pnl-adj-modal .modal-title').textContent = isEdit ? '編輯手動調整' : '新增調整';
-  document.getElementById('pnl-adj-id').value            = isEdit ? r.adjustment_id : '';
-  document.getElementById('pnl-adj-txn-id').value        = '';
-  document.getElementById('pnl-adj-original').value      = '';
-  document.getElementById('pnl-adj-date').value          = r?.date || new Date().toISOString().slice(0,10);
-  document.getElementById('pnl-adj-entity').value        = r?.entity || 'RC';
-  document.getElementById('pnl-adj-broker').value        = r?.broker || '統一';
-  document.getElementById('pnl-adj-code').value          = r?.security_code || '';
-  document.getElementById('pnl-adj-name').value          = r?.security_name || '';
-  document.getElementById('pnl-adj-net').value           = r?.net_amount != null ? Math.round(r.net_amount) : '';
-  document.getElementById('pnl-adj-cost').value          = r?.cost_basis != null ? Math.round(r.cost_basis) : '';
-  document.getElementById('pnl-adj-pnl').value           = r?.realized_pnl != null ? Math.round(r.realized_pnl) : '';
-  document.getElementById('pnl-adj-note').value          = r?.note || '';
-  document.getElementById('pnl-adj-original-row').style.display = 'none';
-  document.getElementById('pnl-adj-modal').style.display = 'flex';
-}
-function editPnlAdj(r) { openPnlAdjModal(r); }
-function closePnlAdjModal() { document.getElementById('pnl-adj-modal').style.display = 'none'; }
-
-async function submitPnlAdj() {
-  const id     = document.getElementById('pnl-adj-id').value;
-  const txnId  = document.getElementById('pnl-adj-txn-id').value;
-  const origPnl= document.getElementById('pnl-adj-original').value;
-  const pnl    = document.getElementById('pnl-adj-pnl').value;
-  if(!pnl) { toast('請填已實現損益金額', 'error'); return; }
-  const body = {
-    date:           document.getElementById('pnl-adj-date').value,
-    entity:         document.getElementById('pnl-adj-entity').value,
-    broker:         document.getElementById('pnl-adj-broker').value,
-    security_code:  document.getElementById('pnl-adj-code').value.trim() || null,
-    security_name:  document.getElementById('pnl-adj-name').value.trim() || null,
-    net_amount:     document.getElementById('pnl-adj-net').value  || null,
-    cost_basis:     document.getElementById('pnl-adj-cost').value || null,
-    realized_pnl:   pnl,
-    original_pnl:   origPnl || null,
-    transaction_id: txnId   || null,
-    note:           document.getElementById('pnl-adj-note').value.trim() || null,
-  };
-  const url    = id ? `${API}/api/pnl_adjustments/${id}` : `${API}/api/pnl_adjustments`;
-  const method = id ? 'PUT' : 'POST';
-  const res    = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  if(res.ok) { toast(id ? '✅ 已更新' : '✅ 已儲存', 'success'); closePnlAdjModal(); loadRealizedPnl(); }
-  else { const e = await res.json(); toast(`❌ ${e.error||'錯誤'}`, 'error'); }
-}
-
-async function deletePnlAdj(id) {
-  if(!confirm('確定刪除此調整？')) return;
-  const res = await fetch(`${API}/api/pnl_adjustments/${id}`, { method:'DELETE' });
-  if(res.ok) { toast('✅ 已刪除', 'success'); loadRealizedPnl(); }
-  else { const e = await res.json(); toast(`❌ ${e.error}`, 'error'); }
-}
 </script>
-
-<!-- ── PnlAdjustment Modal ── -->
-<div class="modal-overlay" id="pnl-adj-modal" style="display:none" onclick="if(event.target.id==='pnl-adj-modal')closePnlAdjModal()">
-  <div class="modal" onclick="event.stopPropagation()" style="width:500px">
-    <div class="modal-title">新增手動調整</div>
-    <input type="hidden" id="pnl-adj-id">
-    <input type="hidden" id="pnl-adj-txn-id">
-    <input type="hidden" id="pnl-adj-original">
-    <div id="pnl-adj-original-row" style="display:none;background:var(--surface2);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--muted)">
-      系統計算原始值：<strong id="pnl-adj-original-display" style="color:var(--text)">—</strong>　→　請在下方填入正確金額
-    </div>
-    <div class="modal-row">
-      <div class="modal-field"><label>日期</label><input type="date" id="pnl-adj-date" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px"></div>
-      <div class="modal-field"><label>帳戶</label>
-        <select id="pnl-adj-entity" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
-          <option>RC</option><option>華強</option><option>私銀RC</option><option>私銀華強</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-row">
-      <div class="modal-field"><label>券商</label>
-        <select id="pnl-adj-broker" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px">
-          <option>統一</option><option>元大</option><option>國泰</option>
-        </select>
-      </div>
-      <div class="modal-field"><label>股票代號（選填）</label><input type="text" id="pnl-adj-code" placeholder="e.g. 6682" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px"></div>
-    </div>
-    <div class="modal-field"><label>股票名稱（選填）</label><input type="text" id="pnl-adj-name" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px"></div>
-    <div class="modal-row">
-      <div class="modal-field"><label>淨收付（選填）</label><input type="number" id="pnl-adj-net" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
-      <div class="modal-field"><label>成本基礎（選填）</label><input type="number" id="pnl-adj-cost" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
-    </div>
-    <div class="modal-field"><label>已實現損益 ★</label><input type="number" id="pnl-adj-pnl" placeholder="必填，負數請填負值 e.g. -58619" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 10px"></div>
-    <div class="modal-field"><label>備註</label><input type="text" id="pnl-adj-note" placeholder="說明調整原因" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px"></div>
-    <input type="hidden" id="pnl-adj-id">
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closePnlAdjModal()">取消</button>
-      <button class="btn btn-success" onclick="submitPnlAdj()">✅ 確認儲存</button>
-    </div>
-  </div>
-</div>
 
 </body>
 </html>
