@@ -236,14 +236,13 @@ def calculate_realized_pnl(entity: str = None):
 
 def get_realized_pnl_ledger(entity=None, broker=None, category=None):
     """
-    Full audit trail for 已實現損益 — read-only, sourced from:
+    Full audit trail for 已實現損益 — read-only computed rows plus manual adjustments.
+    Sources:
     - Stock sells  (weighted-average-cost replay from Transaction history)
     - 非股票損益   (貨幣基金收益 etc., stored as Transaction with security_code=None)
     - 現金股利     (deposited CashDividend records, recognised on announce_date)
-
-    Uses Decimal arithmetic for cost_basis to eliminate ±1 TWD floating-point errors.
+    - 手動調整     (PnlAdjustment records added by Sophie)
     """
-    from decimal import Decimal, ROUND_HALF_UP
     rows = []
 
     # ── 1. Stock sells ────────────────────────────────────────────────────────
@@ -257,31 +256,20 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                  .order_by(Transaction.trade_date, Transaction.id))
             if broker:
                 q = q.filter_by(broker=broker)
-            # Use Decimal for all cost tracking to avoid floating-point rounding errors
-            holdings = {}  # code → {shares: Decimal, total_cost: Decimal}
+            holdings = {}
             for t in q.all():
                 code = t.security_code
                 if code not in holdings:
-                    holdings[code] = {
-                        'shares':     Decimal('0'),
-                        'total_cost': Decimal('0'),
-                    }
+                    holdings[code] = {'shares': 0.0, 'total_cost': 0.0}
                 if t.shares > 0:
-                    holdings[code]['shares']     += Decimal(str(t.shares))
-                    holdings[code]['total_cost'] += Decimal(str(t.gross_amount + t.fee))
+                    holdings[code]['shares']     += t.shares
+                    holdings[code]['total_cost'] += t.gross_amount + t.fee
                 else:
-                    h = holdings[code]
-                    if h['shares'] > 0:
-                        sell_qty   = Decimal(str(abs(t.shares)))
-                        avg_cost_d = h['total_cost'] / h['shares']
-                        # Round cost_basis to nearest integer using ROUND_HALF_UP — same
-                        # rounding convention Excel uses, eliminating ±1 TWD discrepancy
-                        cost_basis_d = (avg_cost_d * sell_qty).quantize(
-                            Decimal('1'), rounding=ROUND_HALF_UP
-                        )
-                        avg_cost   = float(avg_cost_d)
-                        cost_basis = float(cost_basis_d)
-                        realized   = float(Decimal(str(t.net_amount)) - cost_basis_d)
+                    if holdings[code]['shares'] > 0:
+                        sell_qty   = abs(t.shares)
+                        avg_cost   = holdings[code]['total_cost'] / holdings[code]['shares']
+                        cost_basis = avg_cost * sell_qty
+                        realized   = t.net_amount - cost_basis
                         rows.append({
                             'date':          t.trade_date.isoformat() if t.trade_date else None,
                             'entity':        ent,
@@ -289,23 +277,23 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                             'category':      '股票買賣',
                             'security_code': code,
                             'security_name': t.security_name or code,
-                            'shares':        float(sell_qty),
+                            'shares':        sell_qty,
                             'price':         t.price,
                             'gross_amount':  t.gross_amount,
                             'fee':           t.fee,
                             'tax':           t.tax,
                             'net_amount':    t.net_amount,
                             'avg_cost':      round(avg_cost, 4),
-                            'cost_basis':    cost_basis,
-                            'realized_pnl':  realized,
+                            'cost_basis':    round(cost_basis, 0),
+                            'realized_pnl':  round(realized, 0),
                             'note':          None,
+                            'adjustment_id': None,
                         })
-                        # Update holdings using Decimal to prevent cost drift
-                        h['shares']     -= sell_qty
-                        h['total_cost'] -= avg_cost_d * sell_qty
-                        if h['shares'] < Decimal('0.001'):
-                            h['shares']     = Decimal('0')
-                            h['total_cost'] = Decimal('0')
+                        holdings[code]['shares']     -= sell_qty
+                        holdings[code]['total_cost'] -= avg_cost * sell_qty
+                        if holdings[code]['shares'] < 0.001:
+                            holdings[code]['shares']     = 0
+                            holdings[code]['total_cost'] = 0
 
     # ── 2. 貨幣基金收益 / 非股票損益 ─────────────────────────────────────────
     if category in (None, '', '貨幣基金'):
@@ -332,6 +320,7 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                 'cost_basis':    None,
                 'realized_pnl':  t.net_amount,
                 'note':          None,
+                'adjustment_id': None,
             })
 
     # ── 3. 現金股利 (recognised on announce_date) ─────────────────────────────
@@ -357,7 +346,16 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                 'cost_basis':    None,
                 'realized_pnl':  cd.total_amount,
                 'note':          '待入帳' if not cd.deposited else None,
+                'adjustment_id': None,
             })
+
+    # ── 4. Manual adjustments (Sophie's corrections) ─────────────────────────
+    from .models import PnlAdjustment
+    adj_q = PnlAdjustment.query
+    if entity:   adj_q = adj_q.filter_by(entity=entity)
+    if broker:   adj_q = adj_q.filter_by(broker=broker)
+    for adj in adj_q.order_by(PnlAdjustment.date).all():
+        rows.append(adj.to_dict())
 
     rows.sort(key=lambda r: r['date'] or '')
     return rows

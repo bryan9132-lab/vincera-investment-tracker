@@ -505,44 +505,44 @@ class StockDividend(db.Model):
         }
 
 
-class CashCapitalIncrease(db.Model):
-    """現金增資 — Sophie records payment date and expected allocation date separately.
-    Payment creates a cash outflow on payment_date; stock arrives later on allocate_date.
-    Same lifecycle as StockDividend: pending → allocated (creates real Transaction).
+class PnlAdjustment(db.Model):
+    """Manual adjustments to 已實現損益 by Sophie.
+    These sit alongside computed rows in the ledger and are clearly tagged
+    as 手動調整 so auditors can distinguish them from system-computed rows.
     """
-    __tablename__ = 'cash_capital_increases'
+    __tablename__ = 'pnl_adjustments'
 
-    id                     = db.Column(db.Integer,    primary_key=True)
-    payment_date           = db.Column(db.Date,       nullable=False)   # 匯款日
-    entity                 = db.Column(db.String(20), nullable=False)
-    broker                 = db.Column(db.String(20), nullable=False)
-    security_code          = db.Column(db.String(20), db.ForeignKey('securities.code'), nullable=False)
-    shares                 = db.Column(db.Float,      nullable=False)   # 認購股數
-    price_per_share        = db.Column(db.Float,      nullable=False)   # 認購單價
-    total_amount           = db.Column(db.Float,      nullable=False)   # 總匯款金額 = shares * price
-    expected_allocate_date = db.Column(db.Date,       nullable=True)    # 預計入集保日
-    note                   = db.Column(db.String(200),nullable=True)    # 備註
-    allocated              = db.Column(db.Boolean,    default=False)    # 已入集保
-    allocated_at           = db.Column(db.DateTime,   nullable=True)
-    transaction_id         = db.Column(db.Integer,    db.ForeignKey('transactions.id'), nullable=True)
-    created_at             = db.Column(db.DateTime,   default=datetime.utcnow)
-
-    security               = db.relationship('Security', backref='capital_increases')
+    id             = db.Column(db.Integer,    primary_key=True)
+    date           = db.Column(db.Date,       nullable=False)
+    entity         = db.Column(db.String(20), nullable=False)
+    broker         = db.Column(db.String(20), nullable=False)
+    category       = db.Column(db.String(20), default='手動調整')
+    security_code  = db.Column(db.String(20), nullable=True)
+    security_name  = db.Column(db.String(100),nullable=True)
+    net_amount     = db.Column(db.Float,      nullable=True)
+    cost_basis     = db.Column(db.Float,      nullable=True)
+    realized_pnl   = db.Column(db.Float,      nullable=False)
+    note           = db.Column(db.String(200),nullable=True)
+    created_at     = db.Column(db.DateTime,   default=datetime.utcnow)
 
     def to_dict(self):
         return {
-            'id':                     self.id,
-            'payment_date':           self.payment_date.isoformat() if self.payment_date else None,
-            'entity':                 self.entity,
-            'broker':                 self.broker,
-            'security_code':          self.security_code,
-            'security_name':          self.security.name if self.security else self.security_code,
-            'shares':                 self.shares,
-            'price_per_share':        self.price_per_share,
-            'total_amount':           self.total_amount,
-            'expected_allocate_date': self.expected_allocate_date.isoformat() if self.expected_allocate_date else None,
-            'note':                   self.note,
-            'allocated':              self.allocated,
-            'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
-            'transaction_id':         self.transaction_id,
+            'id':            self.id,
+            'date':          self.date.isoformat() if self.date else None,
+            'entity':        self.entity,
+            'broker':        self.broker,
+            'category':      self.category,
+            'security_code': self.security_code,
+            'security_name': self.security_name,
+            'shares':        None,
+            'price':         None,
+            'gross_amount':  None,
+            'fee':           None,
+            'tax':           None,
+            'net_amount':    self.net_amount,
+            'avg_cost':      None,
+            'cost_basis':    self.cost_basis,
+            'realized_pnl':  self.realized_pnl,
+            'note':          self.note,
+            'adjustment_id': self.id,
         }
