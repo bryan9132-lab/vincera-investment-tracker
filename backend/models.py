@@ -504,3 +504,51 @@ class StockDividend(db.Model):
             'allocated':              self.allocated,
             'allocated_at':           self.allocated_at.isoformat() if self.allocated_at else None,
         }
+
+
+class PnlAdjustment(db.Model):
+    """Manual adjustments to 已實現損益 by Sophie.
+    - Edit type (transaction_id set): overrides a specific computed sell row
+    - New entry type (transaction_id None): adds a missing entry
+    calculate_realized_pnl() reads these so 庫存總表 stays in sync.
+    """
+    __tablename__ = 'pnl_adjustments'
+
+    id             = db.Column(db.Integer,    primary_key=True)
+    date           = db.Column(db.Date,       nullable=False)
+    entity         = db.Column(db.String(20), nullable=False)
+    broker         = db.Column(db.String(20), nullable=False)
+    category       = db.Column(db.String(20), default='手動調整')
+    security_code  = db.Column(db.String(20), nullable=True)
+    security_name  = db.Column(db.String(100),nullable=True)
+    net_amount     = db.Column(db.Float,      nullable=True)
+    cost_basis     = db.Column(db.Float,      nullable=True)
+    realized_pnl   = db.Column(db.Float,      nullable=False)
+    original_pnl   = db.Column(db.Float,      nullable=True)
+    transaction_id = db.Column(db.Integer,    nullable=True)
+    note           = db.Column(db.String(200),nullable=True)
+    created_at     = db.Column(db.DateTime,   default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':            self.id,
+            'date':          self.date.isoformat() if self.date else None,
+            'entity':        self.entity,
+            'broker':        self.broker,
+            'category':      self.category,
+            'security_code': self.security_code,
+            'security_name': self.security_name,
+            'shares':        None,
+            'price':         None,
+            'gross_amount':  None,
+            'fee':           None,
+            'tax':           None,
+            'net_amount':    self.net_amount,
+            'avg_cost':      None,
+            'cost_basis':    self.cost_basis,
+            'realized_pnl':  self.realized_pnl,
+            'original_pnl':  self.original_pnl,
+            'transaction_id': self.transaction_id,
+            'note':          self.note,
+            'adjustment_id': self.id,
+        }
