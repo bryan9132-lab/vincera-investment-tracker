@@ -229,16 +229,14 @@ def calculate_realized_pnl(entity: str = None):
                         holdings[code]['shares']     = 0
                         holdings[code]['total_cost'] = 0
 
-        # Include manual adjustments so 庫存總表 matches 已實現損益 tab:
-        # - Edit adjustments (transaction_id set): add the delta (corrected - original)
-        # - New entry adjustments (no transaction_id): add the full amount
+        # Include PnlAdjustments so 庫存總表 matches 已實現損益 tab:
+        # - Edit overrides (transaction_id set): add delta only (original already counted)
+        # - New entries (no transaction_id): add full amount
         from .models import PnlAdjustment
         for adj in PnlAdjustment.query.filter_by(entity=ent).all():
             if adj.transaction_id is not None:
-                # Edit: only add the delta, not the full amount (original already counted above)
                 realized += adj.realized_pnl - (adj.original_pnl or 0)
             else:
-                # New entry: add full amount
                 realized += adj.realized_pnl
 
         result[ent] = round(realized, 0)
@@ -248,12 +246,15 @@ def calculate_realized_pnl(entity: str = None):
 
 def get_realized_pnl_ledger(entity=None, broker=None, category=None):
     """
-    Full audit trail for 已實現損益 — read-only computed rows plus manual adjustments.
-    Sources:
-    - Stock sells  (weighted-average-cost replay from Transaction history)
-    - 非股票損益   (貨幣基金收益 etc., stored as Transaction with security_code=None)
-    - 現金股利     (deposited CashDividend records, recognised on announce_date)
-    - 手動調整     (PnlAdjustment records added by Sophie)
+    Full audit trail for 已實現損益 tab. Sources:
+    - Stock sells        (weighted-avg-cost replay, transaction_id = t.id)
+    - 貨幣基金收益        (Transaction memo='非股票損益', transaction_id = t.id)
+    - 現金股利            (deposited CashDividend, no transaction_id)
+    - 手動調整 (new entry) (PnlAdjustment without transaction_id — separate row)
+
+    Edit overrides: PnlAdjustments WITH transaction_id replace the matching
+    computed row in-place — no extra row appears. This works for both
+    股票買賣 and 貨幣基金 since both now expose their t.id as transaction_id.
     """
     rows = []
 
@@ -283,24 +284,24 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                         cost_basis = avg_cost * sell_qty
                         realized   = t.net_amount - cost_basis
                         rows.append({
-                            'date':          t.trade_date.isoformat() if t.trade_date else None,
-                            'entity':        ent,
-                            'broker':        t.broker,
-                            'category':      '股票買賣',
-                            'security_code': code,
-                            'security_name': t.security_name or code,
-                            'shares':        sell_qty,
-                            'price':         t.price,
-                            'gross_amount':  t.gross_amount,
-                            'fee':           t.fee,
-                            'tax':           t.tax,
-                            'net_amount':    t.net_amount,
-                            'avg_cost':      round(avg_cost, 4),
-                            'cost_basis':    round(cost_basis, 0),
-                            'realized_pnl':  round(realized, 0),
-                            'note':          None,
-                            'adjustment_id': None,
-                            'transaction_id': t.id,   # exposes DB id for edit overrides
+                            'date':           t.trade_date.isoformat() if t.trade_date else None,
+                            'entity':         ent,
+                            'broker':         t.broker,
+                            'category':       '股票買賣',
+                            'security_code':  code,
+                            'security_name':  t.security_name or code,
+                            'shares':         sell_qty,
+                            'price':          t.price,
+                            'gross_amount':   t.gross_amount,
+                            'fee':            t.fee,
+                            'tax':            t.tax,
+                            'net_amount':     t.net_amount,
+                            'avg_cost':       round(avg_cost, 4),
+                            'cost_basis':     round(cost_basis, 0),
+                            'realized_pnl':   round(realized, 0),
+                            'note':           None,
+                            'adjustment_id':  None,
+                            'transaction_id': t.id,
                         })
                         holdings[code]['shares']     -= sell_qty
                         holdings[code]['total_cost'] -= avg_cost * sell_qty
@@ -308,7 +309,8 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
                             holdings[code]['shares']     = 0
                             holdings[code]['total_cost'] = 0
 
-    # ── 2. 貨幣基金收益 / 非股票損益 ─────────────────────────────────────────
+    # ── 2. 貨幣基金收益 ───────────────────────────────────────────────────────
+    # FIX: include t.id as transaction_id so edits override in-place (no new row)
     if category in (None, '', '貨幣基金'):
         q = (Transaction.query
              .filter(Transaction.security_code.is_(None))
@@ -317,23 +319,24 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
         if broker: q = q.filter_by(broker=broker)
         for t in q.order_by(Transaction.trade_date).all():
             rows.append({
-                'date':          t.trade_date.isoformat() if t.trade_date else None,
-                'entity':        t.entity,
-                'broker':        t.broker,
-                'category':      '貨幣基金',
-                'security_code': None,
-                'security_name': t.security_name or '貨幣基金收益',
-                'shares':        None,
-                'price':         None,
-                'gross_amount':  t.net_amount,
-                'fee':           None,
-                'tax':           None,
-                'net_amount':    t.net_amount,
-                'avg_cost':      None,
-                'cost_basis':    None,
-                'realized_pnl':  t.net_amount,
-                'note':          None,
-                'adjustment_id': None,
+                'date':           t.trade_date.isoformat() if t.trade_date else None,
+                'entity':         t.entity,
+                'broker':         t.broker,
+                'category':       '貨幣基金',
+                'security_code':  None,
+                'security_name':  t.security_name or '貨幣基金收益',
+                'shares':         None,
+                'price':          None,
+                'gross_amount':   t.net_amount,
+                'fee':            None,
+                'tax':            None,
+                'net_amount':     t.net_amount,
+                'avg_cost':       None,
+                'cost_basis':     None,
+                'realized_pnl':   t.net_amount,
+                'note':           None,
+                'adjustment_id':  None,
+                'transaction_id': t.id,   # ← KEY FIX: expose t.id so override works
             })
 
     # ── 3. 現金股利 (recognised on announce_date) ─────────────────────────────
@@ -343,47 +346,46 @@ def get_realized_pnl_ledger(entity=None, broker=None, category=None):
         if broker: q = q.filter_by(broker=broker)
         for cd in q.order_by(CashDividend.announce_date).all():
             rows.append({
-                'date':          cd.announce_date.isoformat() if cd.announce_date else None,
-                'entity':        cd.entity,
-                'broker':        cd.broker,
-                'category':      '現金股利',
-                'security_code': cd.security_code,
-                'security_name': cd.security.name if cd.security else cd.security_code,
-                'shares':        cd.shares_held,
-                'price':         cd.dividend_per_share,
-                'gross_amount':  cd.total_amount,
-                'fee':           None,
-                'tax':           None,
-                'net_amount':    cd.total_amount,
-                'avg_cost':      None,
-                'cost_basis':    None,
-                'realized_pnl':  cd.total_amount,
-                'note':          '待入帳' if not cd.deposited else None,
-                'adjustment_id': None,
+                'date':           cd.announce_date.isoformat() if cd.announce_date else None,
+                'entity':         cd.entity,
+                'broker':         cd.broker,
+                'category':       '現金股利',
+                'security_code':  cd.security_code,
+                'security_name':  cd.security.name if cd.security else cd.security_code,
+                'shares':         cd.shares_held,
+                'price':          cd.dividend_per_share,
+                'gross_amount':   cd.total_amount,
+                'fee':            None,
+                'tax':            None,
+                'net_amount':     cd.total_amount,
+                'avg_cost':       None,
+                'cost_basis':     None,
+                'realized_pnl':   cd.total_amount,
+                'note':           None,
+                'adjustment_id':  None,
+                'transaction_id': None,  # CashDividend has no transaction_id
             })
 
-    # ── 4. Apply edit overrides and add new-entry adjustments ────────────────
+    # ── 4. Apply edit overrides + add new-entry adjustments ──────────────────
     from .models import PnlAdjustment
 
-    # Build override map: transaction_id → PnlAdjustment (edit type)
     overrides = {
         adj.transaction_id: adj
         for adj in PnlAdjustment.query.filter(PnlAdjustment.transaction_id.isnot(None)).all()
     }
 
-    # Apply overrides to computed rows
     for row in rows:
         txn_id = row.get('transaction_id')
         if txn_id and txn_id in overrides:
             adj = overrides[txn_id]
             row['realized_pnl']  = adj.realized_pnl
-            row['adjustment_id'] = adj.id        # marks row as edited
-            row['note']          = (adj.note or '') + f' [原始: {round(adj.original_pnl or 0):,}]'
+            row['adjustment_id'] = adj.id
+            row['note'] = (adj.note or '') + f' [原始: {round(adj.original_pnl or 0):,}]'
 
-    # Add new-entry adjustments (no transaction_id) as separate rows
+    # New-entry adjustments (no transaction_id) appear as separate rows
     adj_q = PnlAdjustment.query.filter(PnlAdjustment.transaction_id.is_(None))
-    if entity:   adj_q = adj_q.filter_by(entity=entity)
-    if broker:   adj_q = adj_q.filter_by(broker=broker)
+    if entity: adj_q = adj_q.filter_by(entity=entity)
+    if broker: adj_q = adj_q.filter_by(broker=broker)
     for adj in adj_q.order_by(PnlAdjustment.date).all():
         rows.append(adj.to_dict())
 
