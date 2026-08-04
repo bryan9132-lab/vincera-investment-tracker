@@ -15,8 +15,7 @@ from backend.models import (db, Transaction, Position, Security, UploadLog,
                             ACCOUNT_MAP, CASH_ACCOUNTS, CASH_ACCOUNT_BROKER_MAP,
                             FUND_CASH_LINK, CASH_ACCOUNTS_BY_ID,
                             CashAccount, CashEntry, FundEntry, AuditLog,
-                            CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES,
-                            PnlAdjustment)
+                            CashDividend, StockDividend, DIVIDEND_BROKERS, DIVIDEND_ENTITIES)
 from backend.logic  import recalculate_positions, update_all_prices, fetch_twse_name, calculate_realized_pnl
 from parsers.pdf_parsers import parse_pdf
 from backend.exporter import generate_excel
@@ -50,7 +49,6 @@ def create_app():
     with app.app_context():
         db.create_all()
         _migrate_add_price_type()
-        _migrate_add_pnl_adjustments()
         _seed_securities()
         _seed_cash_accounts()
 
@@ -278,74 +276,6 @@ def create_app():
         result = calculate_realized_pnl()
         return jsonify(result)
 
-    @app.route('/api/realized_pnl_ledger', methods=['GET'])
-    def get_realized_pnl_ledger():
-        """Full audit-trail ledger — computed rows + manual adjustments."""
-        from .logic import get_realized_pnl_ledger as _ledger
-        rows = _ledger(
-            entity   = request.args.get('entity')   or None,
-            broker   = request.args.get('broker')   or None,
-            category = request.args.get('category') or None,
-        )
-        return jsonify(rows)
-
-    # ── 已實現損益手動調整 ─────────────────────────────────────────────────────
-    @app.route('/api/pnl_adjustments', methods=['GET'])
-    def list_pnl_adjustments():
-        return jsonify([a.to_dict() for a in PnlAdjustment.query.order_by(PnlAdjustment.date).all()])
-
-    @app.route('/api/pnl_adjustments', methods=['POST'])
-    def add_pnl_adjustment():
-        data = request.json
-        try:
-            adj_date = date.fromisoformat(data['date'])
-        except Exception:
-            return jsonify({'error': '日期格式錯誤'}), 400
-        if data.get('realized_pnl') is None:
-            return jsonify({'error': '請填已實現損益金額'}), 400
-        adj = PnlAdjustment(
-            date          = adj_date,
-            entity        = data['entity'],
-            broker        = data['broker'],
-            category      = data.get('category', '手動調整'),
-            security_code = data.get('security_code') or None,
-            security_name = data.get('security_name') or None,
-            net_amount    = float(data['net_amount'])   if data.get('net_amount')   is not None else None,
-            cost_basis    = float(data['cost_basis'])   if data.get('cost_basis')   is not None else None,
-            realized_pnl  = float(data['realized_pnl']),
-            original_pnl  = float(data['original_pnl']) if data.get('original_pnl') is not None else None,
-            transaction_id= int(data['transaction_id']) if data.get('transaction_id') else None,
-            note          = data.get('note') or None,
-        )
-        db.session.add(adj)
-        db.session.commit()
-        return jsonify(adj.to_dict()), 201
-
-    @app.route('/api/pnl_adjustments/<int:adj_id>', methods=['PUT'])
-    def update_pnl_adjustment(adj_id):
-        adj = PnlAdjustment.query.get(adj_id)
-        if not adj: return jsonify({'error': '找不到記錄'}), 404
-        data = request.json
-        if data.get('date'):          adj.date          = date.fromisoformat(data['date'])
-        if data.get('entity'):        adj.entity        = data['entity']
-        if data.get('broker'):        adj.broker        = data['broker']
-        if data.get('security_code') is not None: adj.security_code = data['security_code'] or None
-        if data.get('security_name') is not None: adj.security_name = data['security_name'] or None
-        if data.get('net_amount')    is not None: adj.net_amount    = float(data['net_amount'])   if data['net_amount'] != '' else None
-        if data.get('cost_basis')    is not None: adj.cost_basis    = float(data['cost_basis'])   if data['cost_basis'] != '' else None
-        if 'realized_pnl' in data:   adj.realized_pnl  = float(data['realized_pnl'])
-        if 'note' in data:            adj.note          = data['note'] or None
-        db.session.commit()
-        return jsonify(adj.to_dict())
-
-    @app.route('/api/pnl_adjustments/<int:adj_id>', methods=['DELETE'])
-    def delete_pnl_adjustment(adj_id):
-        adj = PnlAdjustment.query.get(adj_id)
-        if not adj: return jsonify({'error': '找不到記錄'}), 404
-        db.session.delete(adj)
-        db.session.commit()
-        return jsonify({'status': 'ok'})
-
     # ── Update market prices ─────────────────────────────────────────────────
     @app.route('/api/prices/update', methods=['POST'])
     def update_prices():
@@ -424,9 +354,16 @@ def create_app():
             gross  = abs(shares) * price
             FEE_RATES = {'統一': 0.00036477, '元大': 0.000625, '國泰': 0.00042465}
             fee_rate = FEE_RATES.get(mapping['broker'], 0.001425)
-            fee    = round(gross * fee_rate)  # 小數點四捨五入
+            fee    = round(gross * fee_rate)
             tax    = round(gross * 0.003) if shares < 0 else 0
-            net    = gross - fee - tax
+            actual_fee = int(t['fee']) if t.get('fee') not in (None, '') else fee
+            actual_tax = int(t['tax']) if t.get('tax') not in (None, '') else tax
+            # Buy: you pay gross + fee (cash outflow = gross + fee)
+            # Sell: you receive gross - fee - tax (net proceeds)
+            if shares > 0:
+                net = gross + actual_fee
+            else:
+                net = gross - actual_fee - actual_tax
 
             trades_preview.append({
                 'security_code':  code,
@@ -435,8 +372,8 @@ def create_app():
                 'shares':         shares,
                 'price':          price,
                 'gross_amount':   round(gross),
-                'fee':            int(t.get('fee', fee)),
-                'tax':            int(t.get('tax', tax)),
+                'fee':            actual_fee,
+                'tax':            actual_tax,
                 'net_amount':     round(net),
             })
 
@@ -1984,38 +1921,6 @@ def _migrate_add_price_type():
         db.session.execute(db.text(
             "ALTER TABLE securities ADD COLUMN IF NOT EXISTS price_type VARCHAR(10) DEFAULT '成交價'"
         ))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-
-def _migrate_add_pnl_adjustments():
-    """Create pnl_adjustments table and ensure all columns exist."""
-    try:
-        db.session.execute(db.text("""
-            CREATE TABLE IF NOT EXISTS pnl_adjustments (
-                id             SERIAL PRIMARY KEY,
-                date           DATE NOT NULL,
-                entity         VARCHAR(20) NOT NULL,
-                broker         VARCHAR(20) NOT NULL,
-                category       VARCHAR(20) DEFAULT '手動調整',
-                security_code  VARCHAR(20),
-                security_name  VARCHAR(100),
-                net_amount     FLOAT,
-                cost_basis     FLOAT,
-                realized_pnl   FLOAT NOT NULL,
-                original_pnl   FLOAT,
-                transaction_id INTEGER,
-                note           VARCHAR(200),
-                created_at     TIMESTAMP DEFAULT NOW()
-            )
-        """))
-        # Add columns if upgrading from earlier version
-        for col_def in [
-            "ALTER TABLE pnl_adjustments ADD COLUMN IF NOT EXISTS original_pnl FLOAT",
-            "ALTER TABLE pnl_adjustments ADD COLUMN IF NOT EXISTS transaction_id INTEGER",
-        ]:
-            db.session.execute(db.text(col_def))
         db.session.commit()
     except Exception:
         db.session.rollback()
