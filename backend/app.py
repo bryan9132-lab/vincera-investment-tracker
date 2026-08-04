@@ -354,16 +354,9 @@ def create_app():
             gross  = abs(shares) * price
             FEE_RATES = {'統一': 0.00036477, '元大': 0.000625, '國泰': 0.00042465}
             fee_rate = FEE_RATES.get(mapping['broker'], 0.001425)
-            fee    = round(gross * fee_rate)
+            fee    = round(gross * fee_rate)  # 小數點四捨五入
             tax    = round(gross * 0.003) if shares < 0 else 0
-            actual_fee = int(t['fee']) if t.get('fee') not in (None, '') else fee
-            actual_tax = int(t['tax']) if t.get('tax') not in (None, '') else tax
-            # Buy: you pay gross + fee (cash outflow = gross + fee)
-            # Sell: you receive gross - fee - tax (net proceeds)
-            if shares > 0:
-                net = gross + actual_fee
-            else:
-                net = gross - actual_fee - actual_tax
+            net    = gross - fee - tax
 
             trades_preview.append({
                 'security_code':  code,
@@ -372,8 +365,8 @@ def create_app():
                 'shares':         shares,
                 'price':          price,
                 'gross_amount':   round(gross),
-                'fee':            actual_fee,
-                'tax':            actual_tax,
+                'fee':            int(t.get('fee', fee)),
+                'tax':            int(t.get('tax', tax)),
                 'net_amount':     round(net),
             })
 
@@ -484,7 +477,9 @@ def create_app():
         broker_f      = request.args.get('broker')
         security_f    = request.args.get('security_code')
         if entity:
-            q = q.filter_by(entity=entity)
+            # Expand RC/華強 to also include their private bank counterparts
+            ENTITY_MAP = {'RC': ['RC', '私銀RC'], '華強': ['華強', '私銀華強']}
+            q = q.filter(Transaction.entity.in_(ENTITY_MAP.get(entity, [entity])))
         if broker_f:
             q = q.filter_by(broker=broker_f)
         if security_f:
@@ -505,7 +500,9 @@ def create_app():
         broker_f   = request.args.get('broker')
         limit      = int(request.args.get('limit', 9999))
         q = Transaction.query.order_by(Transaction.trade_date.desc())
-        if entity:   q = q.filter_by(entity=entity)
+        if entity:
+            ENTITY_MAP = {'RC': ['RC', '私銀RC'], '華強': ['華強', '私銀華強']}
+            q = q.filter(Transaction.entity.in_(ENTITY_MAP.get(entity, [entity])))
         if broker_f: q = q.filter_by(broker=broker_f)
         txns = q.limit(limit).all()
 

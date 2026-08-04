@@ -238,14 +238,25 @@ def generate_excel() -> str:
         elif acct.id in HQ_INVEST: hq_balance += (acct.balance or 0)
 
     # 貸款餘額 and 股東往來
-    def _loan_bal(entity):
-        ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
+    # Map display entity → all DB entity names (incl. private bank)
+    ENTITY_DB_MAP = {'RC': ['RC', '私銀RC'], '華強': ['華強', '私銀華強']}
+
+    def _acct_ids_for(display_entity):
+        """Return CashAccount ids for a display entity (RC or 華強) incl. private bank."""
+        db_entities = ENTITY_DB_MAP.get(display_entity, [display_entity])
+        return [a.id for a in CashAccount.query.filter(
+            CashAccount.entity.in_(db_entities)).all()]
+
+    def _loan_bal(display_entity):
+        ids = _acct_ids_for(display_entity)
+        if not ids: return 0
         return sum(e.amount for e in CashEntry.query.filter(
             CashEntry.account_id.in_(ids),
             CashEntry.entry_type.in_(('貸款','貸款還款'))).all())
 
-    def _borrow_bal(entity):
-        ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
+    def _borrow_bal(display_entity):
+        ids = _acct_ids_for(display_entity)
+        if not ids: return 0
         return sum(e.amount for e in CashEntry.query.filter(
             CashEntry.account_id.in_(ids),
             CashEntry.entry_type.in_(('股東往來（借）','股東往來（還）'))).all())
