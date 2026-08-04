@@ -218,9 +218,6 @@ def generate_excel() -> str:
     ws.row_dimensions[row].height = 51
     row += 2
 
-    # ── 損益 table (RC/華強 only) ─────────────────────────────────────────────
-    ws.merge_cells(start_row=row, start_column=1, end_row=row+1, end_column=2)
-    _cell(ws, row, 1, '損益', font_size=16, bold=True, align='center', border=True)
     # ── 損益 + 資金餘額 SIDE-BY-SIDE ─────────────────────────────────────────
     rRC  = realized.get('RC', 0)   + realized.get('私銀RC', 0)
     rHQ  = realized.get('華強', 0) + realized.get('私銀華強', 0)
