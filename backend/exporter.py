@@ -19,7 +19,6 @@ def _thin_border():
 
 
 def _apply_range_border(ws, min_row, min_col, max_row, max_col):
-    """Apply thin border to all edge cells of a merged or plain range."""
     t = Side(style='thin', color='000000')
     for r in range(min_row, max_row + 1):
         for c in range(min_col, max_col + 1):
@@ -60,10 +59,10 @@ def generate_excel() -> str:
 
     # ── Column widths ────────────────────────────────────────────────────────
     col_w = {
-        'A': 15, 'B': 15, 'C': 19, 'D': 19,
-        'E': 11, 'F': 15, 'G': 30,
-        'H': 11, 'I': 15, 'J': 30,
-        'K': 30, 'L': 30,
+        'A': 11, 'B': 22, 'C': 14, 'D': 18,
+        'E': 12, 'F': 16, 'G': 18,
+        'H': 12, 'I': 16, 'J': 18,
+        'K': 16, 'L': 16,
     }
     for col, w in col_w.items():
         ws.column_dimensions[col].width = w
@@ -85,23 +84,21 @@ def generate_excel() -> str:
                   .all())
     summary_lines = ['今日投資總結：']
     if todays_txns:
-        trades = []
         for t in todays_txns:
             zhang = abs(t.shares) / 1000
             zhang_str = f'{zhang:.3f}'.rstrip('0').rstrip('.')
             action = '買進' if t.shares > 0 else '賣出'
-            trades.append(
+            summary_lines.append(
                 f'{t.entity} {t.broker} {action} {t.security_name or t.security_code} '
                 f'{zhang_str}張 @ {t.price:.2f}'
             )
-        summary_lines.append('、'.join(trades))
     else:
         summary_lines.append('（今日無投資交易）')
 
     ws.merge_cells('A2:L2')
     _cell(ws, 2, 1, '\n'.join(summary_lines), font_size=16, bold=False,
           align='left', valign='top', wrap=True)
-    ws.row_dimensions[2].height = max(74.25, 22 * len(summary_lines))
+    ws.row_dimensions[2].height = max(36, 22 * len(summary_lines))
 
     # ── Row 3-4: Group headers ───────────────────────────────────────────────
     for col in ['A', 'B', 'C', 'D']:
@@ -221,6 +218,9 @@ def generate_excel() -> str:
     ws.row_dimensions[row].height = 51
     row += 2
 
+    # ── 損益 table (RC/華強 only) ─────────────────────────────────────────────
+    ws.merge_cells(start_row=row, start_column=1, end_row=row+1, end_column=2)
+    _cell(ws, row, 1, '損益', font_size=16, bold=True, align='center', border=True)
     # ── 損益 + 資金餘額 SIDE-BY-SIDE ─────────────────────────────────────────
     rRC  = realized.get('RC', 0)   + realized.get('私銀RC', 0)
     rHQ  = realized.get('華強', 0) + realized.get('私銀華強', 0)
@@ -229,7 +229,7 @@ def generate_excel() -> str:
     uHQ  = sum((p.unrealized_pnl() or 0) for p in Position.query
               .filter(Position.entity.in_(['華強','私銀華強'])).filter(Position.shares>0).all())
 
-    # ── Investment broker account balances (統一/元大/私銀 only) ────────────
+    # Investment broker account balances only (統一/元大/私銀)
     RC_INVEST = {'rc_tuni', 'rc_yuanta', 'rc_private'}
     HQ_INVEST = {'hq_tuni', 'hq_yuanta', 'hq_private'}
     rc_balance = hq_balance = 0
@@ -237,111 +237,88 @@ def generate_excel() -> str:
         if acct.id in RC_INVEST:   rc_balance += (acct.balance or 0)
         elif acct.id in HQ_INVEST: hq_balance += (acct.balance or 0)
 
-    # ── 貸款餘額 (private bank loans) ─────────────────────────────────────────
-    def _loan_balance(entity):
+    # 貸款餘額 and 股東往來
+    def _loan_bal(entity):
         ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
-        entries = CashEntry.query.filter(
+        return sum(e.amount for e in CashEntry.query.filter(
             CashEntry.account_id.in_(ids),
-            CashEntry.entry_type.in_(('貸款', '貸款還款'))
-        ).all()
-        return sum(e.amount for e in entries)
+            CashEntry.entry_type.in_(('貸款','貸款還款'))).all())
 
-    # ── 股東往來 (inter-entity loans) ──────────────────────────────────────────
-    def _borrow_balance(entity):
+    def _borrow_bal(entity):
         ids = [a.id for a in CashAccount.query.filter_by(entity=entity).all()]
-        entries = CashEntry.query.filter(
+        return sum(e.amount for e in CashEntry.query.filter(
             CashEntry.account_id.in_(ids),
-            CashEntry.entry_type.in_(('股東往來（借）', '股東往來（還）'))
-        ).all()
-        net = sum(e.amount for e in entries)
-        # 華強 has historical 3M outstanding — ensure floor
-        if entity == '華強' and net > -3_000_000:
-            net = -3_000_000
-        return net
+            CashEntry.entry_type.in_(('股東往來（借）','股東往來（還）'))).all())
 
     pnl_start = row
 
-    # ── LEFT: 損益 (cols A-D, rows 0-4) ────────────────────────────────────
-    ws.merge_cells(start_row=pnl_start, start_column=1, end_row=pnl_start+1, end_column=2)
+    # Row 0: 損益 (A:B single row) | RC (C) | 華強 (D) | right headers F-L
+    ws.merge_cells(start_row=pnl_start, start_column=1, end_row=pnl_start, end_column=2)
     _cell(ws, pnl_start, 1, '損益', font_size=16, bold=True, align='center')
-    _apply_range_border(ws, pnl_start, 1, pnl_start+1, 2)
-    ws.merge_cells(start_row=pnl_start, start_column=3, end_row=pnl_start, end_column=4)
-    _cell(ws, pnl_start, 3, '合計', font_size=16, bold=True, align='center')
-    _apply_range_border(ws, pnl_start, 3, pnl_start, 4)
+    _apply_range_border(ws, pnl_start, 1, pnl_start, 2)
+    for col_i, lbl in [(3,'RC'), (4,'華強')]:
+        c2 = ws.cell(pnl_start, col_i, lbl)
+        c2.font = Font(name='微軟正黑體', size=16, bold=True)
+        c2.alignment = Alignment(horizontal='center', vertical='center')
+        c2.border = _thin_border()
     ws.row_dimensions[pnl_start].height = 59.25
 
-    for col_i, lbl in [(3,'RC'), (4,'華強')]:
-        c2 = ws.cell(pnl_start+1, col_i, lbl)
-        c2.font      = Font(name='微軟正黑體', size=16, bold=True)
-        c2.alignment = Alignment(horizontal='center', vertical='center')
-        c2.border    = _thin_border()
-    ws.row_dimensions[pnl_start+1].height = 67.5
+    # Right side headers
+    _cell(ws, pnl_start, 6, '賬戶', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 6, pnl_start, 6)
+    ws.merge_cells(start_row=pnl_start, start_column=7, end_row=pnl_start, end_column=8)
+    _cell(ws, pnl_start, 7, '資金餘額', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 7, pnl_start, 8)
+    ws.merge_cells(start_row=pnl_start, start_column=9, end_row=pnl_start, end_column=10)
+    _cell(ws, pnl_start, 9, '貸款餘額', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 9, pnl_start, 10)
+    ws.merge_cells(start_row=pnl_start, start_column=11, end_row=pnl_start, end_column=12)
+    _cell(ws, pnl_start, 11, '股東往來', font_size=16, bold=True, align='center')
+    _apply_range_border(ws, pnl_start, 11, pnl_start, 12)
 
+    # Rows 1-3: 已實現損益 / 未實現損益 / 合計  (left) + RC/華強 balances (right)
     pnl_data = [('已實現損益', rRC, rHQ), ('未實現損益', uRC, uHQ), ('合計', rRC+uRC, rHQ+uHQ)]
-    pnl_row_heights = [77.25, 69, 55.5]
+    pnl_heights = [77.25, 69, 55.5]
+    right_data = [
+        ('RC',  rc_balance, _loan_bal('RC'),   _borrow_bal('RC')),
+        ('華強', hq_balance, _loan_bal('華強'), _borrow_bal('華強')),
+    ]
+
     for i, (label, rc, hq) in enumerate(pnl_data):
-        r = pnl_start + 2 + i
+        r = pnl_start + 1 + i
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
         _cell(ws, r, 1, label, font_size=16, bold=True, align='left')
         _apply_range_border(ws, r, 1, r, 2)
         for col_i, val in enumerate([rc, hq], 3):
             clr = 'C00000' if val < 0 else '000000'
             c = ws.cell(r, col_i, round(val))
-            c.font          = Font(name='微軟正黑體', size=16, bold=(label=='合計'), color=clr)
-            c.alignment     = Alignment(horizontal='right', vertical='center')
+            c.font = Font(name='微軟正黑體', size=16, bold=(label=='合計'), color=clr)
+            c.alignment = Alignment(horizontal='right', vertical='center')
             c.number_format = '#,##0'
-            c.border        = _thin_border()
-        ws.row_dimensions[r].height = pnl_row_heights[i]
+            c.border = _thin_border()
+        ws.row_dimensions[r].height = pnl_heights[i]
 
-    # ── RIGHT: 賬戶 / 資金餘額 / 貸款餘額 / 股東往來 (cols F-L, rows 0-2) ──────
-    # Headers: F=賬戶, G=資金餘額, H=貸款餘額, I=股東往來 (each spans 2 cols except 賬戶)
-    right_headers = [
-        (6, 6, '賬戶'),      # F:F
-        (7, 8, '資金餘額'),  # G:H
-        (9, 10, '貸款餘額'), # I:J
-        (11, 12, '股東往來'), # K:L
-    ]
-    for sc, ec, lbl in right_headers:
-        if sc != ec:
-            ws.merge_cells(start_row=pnl_start, start_column=sc, end_row=pnl_start, end_column=ec)
-        _cell(ws, pnl_start, sc, lbl, font_size=16, bold=True, align='center')
-        _apply_range_border(ws, pnl_start, sc, pnl_start, ec)
+        # Right side: RC row 1, 華強 row 2 (blank for row 3 / 合計)
+        if i < 2:
+            rlabel, rbal, rloan, rborrow = right_data[i]
+            _cell(ws, r, 6, rlabel, font_size=16, bold=True, align='left')
+            _apply_range_border(ws, r, 6, r, 6)
+            ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=8)
+            cb = ws.cell(r, 7, round(rbal))
+            cb.font=Font(name='微軟正黑體',size=16); cb.alignment=Alignment(horizontal='right',vertical='center')
+            cb.number_format='#,##0'; _apply_range_border(ws, r, 7, r, 8)
+            ws.merge_cells(start_row=r, start_column=9, end_row=r, end_column=10)
+            cl = ws.cell(r, 9, abs(round(rloan)) if rloan else 0)
+            cl.font=Font(name='微軟正黑體',size=16); cl.alignment=Alignment(horizontal='right',vertical='center')
+            cl.number_format='#,##0'; _apply_range_border(ws, r, 9, r, 10)
+            ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=12)
+            bv = abs(round(rborrow)) if rborrow else None
+            cbw = ws.cell(r, 11, bv if bv else '—')
+            cbw.font=Font(name='微軟正黑體',size=16); cbw.alignment=Alignment(horizontal='right',vertical='center')
+            if bv: cbw.number_format='#,##0'
+            _apply_range_border(ws, r, 11, r, 12)
 
-    rc_loan  = _loan_balance('RC')
-    hq_loan  = _loan_balance('華強')
-    rc_borrow = _borrow_balance('RC')
-    hq_borrow = _borrow_balance('華強')
-
-    for i, (label, bal, loan, borrow) in enumerate([
-        ('RC',  rc_balance, rc_loan, rc_borrow),
-        ('華強', hq_balance, hq_loan, hq_borrow),
-    ]):
-        r = pnl_start + 1 + i
-        # 賬戶 label
-        _cell(ws, r, 6, label, font_size=16, bold=True, align='left')
-        _apply_range_border(ws, r, 6, r, 6)
-        # 資金餘額
-        ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=8)
-        c = ws.cell(r, 7, round(bal))
-        c.font=Font(name='微軟正黑體',size=16); c.alignment=Alignment(horizontal='right',vertical='center')
-        c.number_format='#,##0'
-        _apply_range_border(ws, r, 7, r, 8)
-        # 貸款餘額 (show absolute value; 0 → 0, loan is negative if outstanding)
-        ws.merge_cells(start_row=r, start_column=9, end_row=r, end_column=10)
-        loan_disp = abs(round(loan)) if loan else 0
-        c2 = ws.cell(r, 9, loan_disp)
-        c2.font=Font(name='微軟正黑體',size=16); c2.alignment=Alignment(horizontal='right',vertical='center')
-        c2.number_format='#,##0'
-        _apply_range_border(ws, r, 9, r, 10)
-        # 股東往來 (show absolute value or — if zero)
-        ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=12)
-        borrow_disp = abs(round(borrow)) if borrow else None
-        c3 = ws.cell(r, 11, borrow_disp if borrow_disp else '—')
-        c3.font=Font(name='微軟正黑體',size=16); c3.alignment=Alignment(horizontal='right',vertical='center')
-        if borrow_disp: c3.number_format='#,##0'
-        _apply_range_border(ws, r, 11, r, 12)
-
-    row = pnl_start + 5
+    row = pnl_start + 4
 
     tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False,
         prefix=f'庫存總表_{date.today().strftime("%Y%m%d")}_')
