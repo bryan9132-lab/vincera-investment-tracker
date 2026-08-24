@@ -270,7 +270,10 @@ def create_app():
                         })
         return jsonify(result)
 
-
+    @app.route('/demo')
+    def demo():
+        from flask import send_from_directory
+        return send_from_directory('frontend', 'demo.html')
     # ── Realized P&L ────────────────────────────────────────────────────────
     @app.route('/api/realized_pnl', methods=['GET'])
     def get_realized_pnl():
