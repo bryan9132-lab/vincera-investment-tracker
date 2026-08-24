@@ -272,8 +272,10 @@ def create_app():
 
     @app.route('/demo')
     def demo():
+        import os
         from flask import send_from_directory
-        return send_from_directory('frontend', 'demo.html')
+        frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend')
+        return send_from_directory(frontend_dir, 'demo.html')
     # ── Realized P&L ────────────────────────────────────────────────────────
     @app.route('/api/realized_pnl', methods=['GET'])
     def get_realized_pnl():
