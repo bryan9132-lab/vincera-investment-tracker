@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIT — Vincera Investment Tracker · Demo</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2230;--border:#30363d;--text:#e6edf3;--muted:#7d8590;--accent:#4f8ef7;--positive:#3fb950;--negative:#f85149;--warning:#f0a500;--font:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono','Fira Code',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5}
+.demo-banner{background:linear-gradient(90deg,#1a2a4a,#162035);border-bottom:1px solid var(--accent);padding:10px 24px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+.demo-badge{background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:.5px;text-transform:uppercase}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:4px;height:48px}
+.logo{font-weight:700;font-size:15px;margin-right:16px;color:var(--text);letter-spacing:-.3px}
+.logo span{color:var(--accent)}
+.tab{padding:8px 14px;border-radius:6px;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s}
+.tab:hover{color:var(--text);background:var(--surface2)}
+.tab.active{color:var(--text);background:var(--surface2);font-weight:600}
+.page{display:none;padding:20px 24px;max-width:1400px;margin:0 auto}
+.page.active{display:block}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.card-title{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.summary-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.summary-label{font-size:11px;color:var(--muted);margin-bottom:4px}
+.summary-big{font-size:22px;font-weight:700;font-family:var(--mono)}
+.summary-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.pos{color:var(--positive)}.neg{color:var(--negative)}
+.holdings-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.entity-block{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.entity-title{font-weight:700;font-size:15px;margin-bottom:4px}
+.entity-pnl{font-size:12px;color:var(--muted);margin-bottom:12px}
+.broker-label{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.holding-row{display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)}
+.holding-row:last-child{border-bottom:none}
+.holding-code{font-size:11px;color:var(--muted)}
+.holding-name{font-weight:600;font-size:13px}
+.holding-price{font-size:11px;color:var(--muted);margin-top:2px}
+.holding-nums{text-align:right}
+.holding-shares{font-weight:700;font-size:14px;font-family:var(--mono)}
+.holding-value{font-size:13px;font-family:var(--mono)}
+.holding-pnl{font-size:12px;font-weight:600;font-family:var(--mono)}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--mono);font-size:12px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+.tr{text-align:right}
+td.name{font-family:var(--font);font-size:13px}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px}
+.tag-buy{background:rgba(63,185,80,.15);color:var(--positive)}
+.tag-sell{background:rgba(248,81,73,.15);color:var(--negative)}
+.tag-blue{background:rgba(79,142,247,.15);color:var(--accent)}
+.tag-green{background:rgba(63,185,80,.15);color:var(--positive)}
+.tag-gold{background:rgba(240,165,0,.15);color:var(--warning)}
+.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.filters{display:flex;gap:8px;flex-wrap:wrap}
+select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;cursor:pointer}
+.count{font-size:12px;color:var(--muted)}
+.pnl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.pnl-stat{background:var(--surface2);border-radius:8px;padding:14px}
+.pnl-stat-label{font-size:11px;color:var(--muted);margin-bottom:6px}
+.pnl-stat-val{font-size:20px;font-weight:700;font-family:var(--mono)}
+.pnl-stat-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.cash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.cash-card{background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.cash-name{font-size:11px;color:var(--muted);margin-bottom:4px}
+.cash-type{font-size:10px;color:var(--accent);margin-bottom:6px}
+.cash-val{font-size:16px;font-weight:700;font-family:var(--mono)}
+.about-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.about-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.about-card h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--accent)}
+.about-card p{color:var(--muted);font-size:13px;line-height:1.7}
+.about-card strong{color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="demo-banner">
+  <span class="demo-badge">Demo</span>
+  <span><strong>VIT — Vincera Investment Tracker</strong> &nbsp;·&nbsp; Built by Bryan Chen &nbsp;·&nbsp; Sample data only. Production system manages a real Taiwan family office portfolio.</span>
+</div>
+
+<div class="topbar">
+  <div class="logo">仕<span>華</span> VIT</div>
+  <div class="tab active" onclick="show('holdings')">📊 Holdings</div>
+  <div class="tab" onclick="show('trades')">📋 Transactions</div>
+  <div class="tab" onclick="show('pnl')">📈 Realized P&amp;L</div>
+  <div class="tab" onclick="show('cash')">💰 Cash Accounts</div>
+  <div class="tab" onclick="show('dividends')">🎁 Dividends</div>
+  <div class="tab" onclick="show('about')" style="margin-left:auto;color:var(--accent)">ℹ️ About VIT</div>
+</div>
+
+<!-- ══ HOLDINGS ══ -->
+<div class="page active" id="page-holdings">
+  <div class="summary-row">
+    <div class="summary-card"><div class="summary-label">Total Portfolio Value</div><div class="summary-big">NT$142.6M</div><div class="summary-sub">2 entities · 3 brokers</div></div>
+    <div class="summary-card"><div class="summary-label">Unrealized Gain/Loss</div><div class="summary-big neg">-NT$793K</div><div class="summary-sub">Market price updated today</div></div>
+    <div class="summary-card"><div class="summary-label">Realized P&amp;L (YTD)</div><div class="summary-big pos">+NT$17.7M</div><div class="summary-sub">Stocks · Dividends · Fund income</div></div>
+    <div class="summary-card"><div class="summary-label">Cash Balance</div><div class="summary-big">NT$52.1M</div><div class="summary-sub">Across 8 brokerage accounts</div></div>
+  </div>
+  <div class="holdings-grid">
+    <div class="entity-block">
+      <div class="entity-title">RC <span style="font-size:12px;color:var(--muted);font-weight:400">(Principal)</span></div>
+      <div class="entity-pnl neg">Unrealized P&L: -NT$398,506</div>
+      <div class="broker-label">Cathay Securities · Mega Securities</div>
+      <div class="holding-row"><div><div class="holding-code">2330</div><div class="holding-name">TSMC</div><div class="holding-price">Market NT$2,425 · Avg cost NT$2,435.89</div></div><div class="holding-nums"><div class="holding-shares">1 lot</div><div class="holding-value">NT$2,435,888</div><div class="holding-pnl neg">-NT$15,888</div></div></div>
+      <div class="holding-row"><div><div class="holding-code">6682</div><div class="holding-name">Huaxu Advanced</div><div class="holding-price">Market NT$37.80 · Avg cost NT$50.46</div></div><div class="holding-nums"><div class="holding-shares">30.61 lots</div><div class="holding-value">NT$1,544,714</div><div class="holding-pnl neg">-NT$382,618</div></div></div>
+      <div class="holding-row"><div><div class="holding-code">00757</div><div class="holding-name">FANG+ ETF</div><div class="holding-price">Market NT$126.5 · Avg cost NT$130.70</div></div><div class="holding-nums"><div class="holding-shares">8 lots</div><div class="holding-value">NT$1,045,581</div><div class="holding-pnl neg">-NT$33,581</div></div></div>
+    </div>
+    <div class="entity-block">
+      <div class="entity-title">HuaQiang Fund <span style="font-size:12px;color:var(--muted);font-weight:400">(Family Fund)</span></div>
+      <div class="entity-pnl neg">Unrealized P&L: -NT$395,113</div>
+      <div class="broker-label">Cathay Securities · Mega Securities</div>
+      <div class="holding-row"><div><div class="holding-code">2330</div><div class="holding-name">TSMC</div><div class="holding-price">Market NT$2,425 · Avg cost NT$2,435.89</div></div><div class="holding-nums"><div class="holding-shares">1 lot</div><div class="holding-value">NT$2,435,888</div><div class="holding-pnl neg">-NT$15,888</div></div></div>
+      <div class="holding-row"><div><div class="holding-code">6682</div><div class="holding-name">Huaxu Advanced</div><div class="holding-price">Market NT$37.80 · Avg cost NT$50.35</div></div><div class="holding-nums"><div class="holding-shares">30.61 lots</div><div class="holding-value">NT$1,541,321</div><div class="holding-pnl neg">-NT$379,225</div></div></div>
+      <div class="holding-row"><div><div class="holding-code">00830</div><div class="holding-name">Cathay Semi ETF</div><div class="holding-price">Market NT$99.85 · Avg cost NT$100.44</div></div><div class="holding-nums"><div class="holding-shares">10 lots</div><div class="holding-value">NT$1,004,366</div><div class="holding-pnl neg">-NT$5,866</div></div></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-title">P&L Summary</div>
+    <table><thead><tr><th></th><th>RC (Broker)</th><th>HuaQiang (Broker)</th><th>RC (Private Banking)</th><th>HuaQiang (Private Banking)</th></tr></thead>
+    <tbody>
+      <tr><td class="name">Realized P&L</td><td class="tr pos">+8,550,210</td><td class="tr pos">+7,935,451</td><td class="tr pos">+2,856,551</td><td class="tr pos">+3,129,402</td></tr>
+      <tr><td class="name">Unrealized P&L</td><td class="tr neg">-398,506</td><td class="tr neg">-395,113</td><td class="tr">—</td><td class="tr">—</td></tr>
+      <tr style="font-weight:700"><td class="name">Total</td><td class="tr pos">+8,151,704</td><td class="tr pos">+7,540,338</td><td class="tr pos">+2,856,551</td><td class="tr pos">+3,129,402</td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ══ TRANSACTIONS ══ -->
+<div class="page" id="page-trades">
+  <div class="toolbar">
+    <div class="filters">
+      <select id="f-entity" onchange="renderTrades()"><option value="">All Entities</option><option>RC</option><option>HuaQiang</option><option>RC (Private)</option><option>HuaQiang (Private)</option></select>
+      <select id="f-broker" onchange="renderTrades()"><option value="">All Brokers</option><option>Cathay</option><option>Mega</option><option>Sinopac</option></select>
+      <select id="f-month" onchange="renderTrades()"><option value="">All Months</option><option value="2026-07">2026-07</option><option value="2026-06">2026-06</option><option value="2026-05">2026-05</option><option value="2026-04">2026-04</option><option value="2026-03">2026-03</option></select>
+      <select id="f-type" onchange="renderTrades()"><option value="">All Types</option><option>Buy</option><option>Sell</option><option>Dividend</option></select>
+    </div>
+    <div class="count" id="trade-count"></div>
+  </div>
+  <div class="card" style="padding:0"><div class="table-wrap">
+    <table><thead><tr><th>Date</th><th>Entity</th><th>Broker</th><th>Type</th><th>Ticker</th><th>Name</th><th class="tr">Shares</th><th class="tr">Price</th><th class="tr">Gross Amount</th><th class="tr">Net Amount</th></tr></thead>
+    <tbody id="trade-body"></tbody></table>
+  </div></div>
+  <div style="font-size:11px;color:var(--muted);text-align:center;padding:8px">Sample data. Production system auto-parses broker PDFs (Sinopac, Mega, Cathay) and supports drag-and-drop upload or manual entry.</div>
+</div>
+
+<!-- ══ REALIZED P&L ══ -->
+<div class="page" id="page-pnl">
+  <div class="pnl-grid">
+    <div class="pnl-stat"><div class="pnl-stat-label">RC — Total Realized P&amp;L</div><div class="pnl-stat-val pos">+NT$11,406,761</div><div class="pnl-stat-sub">Broker accounts + Private banking</div></div>
+    <div class="pnl-stat"><div class="pnl-stat-label">HuaQiang — Total Realized P&amp;L</div><div class="pnl-stat-val pos">+NT$11,064,853</div><div class="pnl-stat-sub">Broker accounts + Private banking</div></div>
+  </div>
+  <div class="toolbar">
+    <div class="filters">
+      <select id="pf-entity" onchange="renderPnl()"><option value="">All Entities</option><option>RC</option><option>HuaQiang</option><option>RC (Private)</option><option>HuaQiang (Private)</option></select>
+      <select id="pf-broker" onchange="renderPnl()"><option value="">All Brokers</option><option>Cathay</option><option>Mega</option><option>Sinopac</option></select>
+      <select id="pf-cat" onchange="renderPnl()"><option value="">All Categories</option><option value="Stock Sale">Stock Sale</option><option value="Money Market">Money Market</option><option value="Cash Dividend">Cash Dividend</option></select>
+      <select id="pf-month" onchange="renderPnl()"><option value="">All Months</option><option value="2026-07">2026-07</option><option value="2026-06">2026-06</option><option value="2026-05">2026-05</option><option value="2026-04">2026-04</option><option value="2026-03">2026-03</option></select>
+    </div>
+    <div class="count" id="pnl-count"></div>
+  </div>
+  <div class="card" style="padding:0"><div class="table-wrap">
+    <table><thead><tr><th>Date</th><th>Entity</th><th>Broker</th><th>Category</th><th>Ticker</th><th>Name</th><th class="tr">Shares</th><th class="tr">Net Proceeds</th><th class="tr">Avg Cost</th><th class="tr">Cost Basis</th><th class="tr">Realized P&amp;L</th></tr></thead>
+    <tbody id="pnl-body"></tbody></table>
+  </div></div>
+  <div style="font-size:11px;color:var(--muted);text-align:center;padding:8px">Weighted-average cost method. Includes stock sales, money market income, and dividends. Supports manual adjustments with full audit trail.</div>
+</div>
+
+<!-- ══ CASH ACCOUNTS ══ -->
+<div class="page" id="page-cash">
+  <div class="card"><div class="card-title">RC — Total NT$38,855,318</div>
+    <div class="cash-grid">
+      <div class="cash-card"><div class="cash-name">Cathay Fuxing Branch</div><div class="cash-type">Stock Brokerage</div><div class="cash-val">5,644,747</div></div>
+      <div class="cash-card"><div class="cash-name">Mega Guangfu Branch</div><div class="cash-type">Stock Brokerage</div><div class="cash-val">3,626</div></div>
+      <div class="cash-card"><div class="cash-name">Sinopac Private Banking</div><div class="cash-type">Private Banking</div><div class="cash-val">2,608,484</div></div>
+      <div class="cash-card"><div class="cash-name">Cathay Dunnan Personal</div><div class="cash-type">Personal Account</div><div class="cash-val">4,554,441</div></div>
+      <div class="cash-card"><div class="cash-name">Money Market Fund</div><div class="cash-type" style="color:var(--warning)">Fund Investment</div><div class="cash-val">26,043,158</div></div>
+      <div class="cash-card"><div class="cash-name">Other</div><div class="cash-type">Misc</div><div class="cash-val">862</div></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-title">HuaQiang — Total NT$9,447,097</div>
+    <div class="cash-grid">
+      <div class="cash-card"><div class="cash-name">Cathay Fuxing Branch</div><div class="cash-type">Stock Brokerage</div><div class="cash-val">4,570,809</div></div>
+      <div class="cash-card"><div class="cash-name">Mega Nandong Branch</div><div class="cash-type">Stock Brokerage</div><div class="cash-val">28</div></div>
+      <div class="cash-card"><div class="cash-name">Sinopac Private Banking</div><div class="cash-type">Private Banking</div><div class="cash-val">2,645,794</div></div>
+      <div class="cash-card"><div class="cash-name">Cathay Dunnan Branch</div><div class="cash-type">Non-Investment</div><div class="cash-val">1,623,325</div></div>
+      <div class="cash-card"><div class="cash-name">Hua Nan Bank</div><div class="cash-type">Non-Investment</div><div class="cash-val">560,625</div></div>
+      <div class="cash-card"><div class="cash-name">Fubon / Mega Bank</div><div class="cash-type">Non-Investment</div><div class="cash-val">46,516</div></div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);text-align:center;padding:0 0 12px">Cash balances update automatically when transactions are uploaded. Supports inter-entity transfers, bank loans, and shareholder loan tracking.</div>
+</div>
+
+<!-- ══ DIVIDENDS ══ -->
+<div class="page" id="page-dividends">
+  <div class="card"><div class="card-title">Cash Dividends</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Entity</th><th>Broker</th><th>Ticker</th><th>Name</th><th class="tr">Total</th><th>Period</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>2026-04-09</td><td>RC</td><td>Mega</td><td>2330</td><td class="name">TSMC</td><td class="tr pos">12,000</td><td>FY2025</td><td><span class="tag tag-green">✅ Deposited</span></td></tr>
+        <tr><td>2026-04-09</td><td>HuaQiang (Private)</td><td>Sinopac</td><td>2330</td><td class="name">TSMC</td><td class="tr pos">12,000</td><td>FY2025</td><td><span class="tag tag-green">✅ Deposited</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card"><div class="card-title">Stock Dividends (Bonus Shares)</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Ex-Date</th><th>Entity</th><th>Broker</th><th>Ticker</th><th>Name</th><th class="tr">Existing Lots</th><th class="tr">Bonus Shares</th><th>Expected Allocation</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>2026-08-01</td><td>RC</td><td>Cathay</td><td>6682</td><td class="name">Huaxu Advanced</td><td class="tr">30,610</td><td class="tr">765</td><td>2026-10-15</td><td><span class="tag tag-gold">⏳ Pending</span></td></tr>
+        <tr><td>2026-08-01</td><td>HuaQiang</td><td>Cathay</td><td>6682</td><td class="name">Huaxu Advanced</td><td class="tr">30,610</td><td class="tr">765</td><td>2026-10-15</td><td><span class="tag tag-gold">⏳ Pending</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);text-align:center;padding:0 0 12px">Dividend workflow: entry on announcement → two-step confirmation (cash credited / shares allocated) → auto-updates position and P&L.</div>
+</div>
+
+<!-- ══ ABOUT VIT ══ -->
+<div class="page" id="page-about">
+<div style="max-width:860px;margin:0 auto">
+  <div style="margin-bottom:28px">
+    <div style="font-size:11px;color:var(--accent);font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">What is VIT?</div>
+    <div style="font-size:22px;font-weight:700;margin-bottom:12px;line-height:1.3">A full-stack portfolio management system built for a Taiwan family office — replacing manual Excel workflows with a live, multi-entity investment tracker.</div>
+    <div style="color:var(--muted);line-height:1.7">Vincera Capital manages equity positions across 4 entities (two principals, two private banking arms) and 3 brokers. Before VIT, all reconciliation was done manually in Excel with no audit trail and no automated P&L tracking. VIT centralises every workflow — from trade upload to dividend management to Excel reporting — in a single web application.</div>
+  </div>
+  <div class="about-grid">
+    <div class="about-card"><h3>📄 Trade Upload — Two Paths</h3><p><strong>PDF auto-parse:</strong> Sophie drags a broker statement PDF onto the upload zone. VIT's custom parser extracts all trades — ticker, shares, price, fee, tax, net amount — and previews them before saving. Three different broker formats (Sinopac, Mega, Cathay) are each handled by a dedicated parser accounting for their column layouts and merged-cell quirks.<br><br><strong>Manual entry:</strong> For OTC trades or capital increases not confirmed by a broker, Sophie enters the trade directly. The form auto-calculates broker fees by account and flags net amount discrepancies before submission.</p></div>
+    <div class="about-card"><h3>📊 Real-Time Market Prices</h3><p>A single button fetches the latest closing price for every held security from the <strong>Taiwan Stock Exchange (TWSE) public API</strong>. Prices are stored and used to compute unrealized P&L across all positions instantly.<br><br>Holdings also support two price modes per security: <strong>transaction price</strong> (last trade) and <strong>average price</strong> (calculated from recent TWSE data) — toggled per stock so Sophie can compare both views without re-fetching.</p></div>
+    <div class="about-card"><h3>⚖️ Position & P&L Calculation Engine</h3><p>Every time a trade is confirmed, VIT replays the full transaction history for that entity using the <strong>weighted-average cost method</strong> to recompute cost basis and realized P&L. This guarantees accuracy even after partial sells, stock splits, or bonus share allocations.<br><br>The Holdings tab shows projected average cost when pending stock dividends exist — so Sophie sees the post-allocation price before the shares officially arrive.</p></div>
+    <div class="about-card"><h3>🎁 Dividend Management</h3><p><strong>Cash dividends</strong> are entered on announcement date and marked "deposited" once credited — flowing into Realized P&L automatically.<br><br><strong>Stock dividends</strong> (bonus shares) follow the same two-step pattern: pending until allocation date, with an ⏳ badge and projected new average cost shown in Holdings. One click confirms and updates the position.<br><br><strong>Capital increases</strong> (direct cash subscriptions to unlisted companies) are also tracked — recorded on payment date, pending until shares arrive.</p></div>
+    <div class="about-card"><h3>💰 Cash Account Ledger</h3><p>VIT tracks 12 cash accounts across 4 entities — brokerage, private banking, personal bank accounts, and money market funds. Each trade automatically debits or credits the correct account.<br><br>Sophie can also record: fund transfers, bank loans, inter-entity shareholder loans (RC ↔ HuaQiang), loan repayments, and unlisted company dividend income. The Cash Accounts tab shows a full running ledger with balance history per account.</p></div>
+    <div class="about-card"><h3>📈 Realized P&L — Full Audit Trail</h3><p>The Realized P&L tab shows every income event — stock sales, money market income, and cash dividends — with computed net proceeds, cost basis, and gain/loss, filterable by entity, broker, category, and month.<br><br>Sophie can apply <strong>manual adjustments</strong> to any computed row (for rounding corrections or missing data), with the original value preserved for reference. Adjustments flow through automatically to the Holdings dashboard so both views always agree. Full CSV export with one click.</p></div>
+    <div class="about-card"><h3>📤 Excel Export — Daily Report</h3><p>The Holdings tab exports a formatted Excel report with today's date, a summary of the day's trades, full position table by entity and broker, P&L summary (realized + unrealized side-by-side), and cash balances — including private banking loan and shareholder loan balances.<br><br>Column widths, fonts, borders, and number formats match the family office's existing reporting template exactly, so the file is ready to send without further formatting.</p></div>
+    <div class="about-card"><h3>🏗️ Architecture</h3><p><strong>Backend:</strong> Python / Flask · PostgreSQL · SQLAlchemy ORM · Railway<br><strong>Frontend:</strong> Vanilla JS single-page app (no framework)<br><strong>PDF parsing:</strong> Custom parsers per broker format (pdfplumber)<br><strong>Excel export:</strong> openpyxl with programmatic formatting<br><strong>Market data:</strong> TWSE public REST API<br><strong>Auth:</strong> HTTP Basic Auth gating (demo excluded)<br><br>~4,500 lines across 6 core files. Built and iterated over 4 months while managing the family office as EVP.</p></div>
+  </div>
+  <div class="card" style="border-color:var(--accent);background:rgba(79,142,247,.05)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px">🚧 In Progress</div>
+    <div style="color:var(--muted);font-size:13px;line-height:1.7"><strong style="color:var(--text)">Foreign investment module:</strong> Extending VIT to track USD and JPY-denominated positions held through private banking — with FX rate tracking, multi-currency cost basis, and TWD-equivalent reporting.<br><br>Built by <strong style="color:var(--text)">Bryan Chen</strong> (Haas MBA '28) · Previously EVP at Vincera Capital · <a href="mailto:bryan.chen@haas.berkeley.edu" style="color:var(--accent)">bryan.chen@haas.berkeley.edu</a></div>
+  </div>
+</div>
+</div>
+
+<script>
+const TRADES=[
+  {date:'2026-07-14',entity:'RC',broker:'Cathay',type:'Buy',ticker:'6682',name:'Huaxu Advanced',shares:'5,000',price:'39.05',gross:'195,250',net:'-195,321',pos:false},
+  {date:'2026-07-14',entity:'HuaQiang',broker:'Cathay',type:'Buy',ticker:'6682',name:'Huaxu Advanced',shares:'5,000',price:'40.35',gross:'201,750',net:'-201,822',pos:false},
+  {date:'2026-07-09',entity:'RC',broker:'Cathay',type:'Buy',ticker:'2330',name:'TSMC',shares:'1,000',price:'2,435',gross:'2,435,000',net:'-2,435,888',pos:false},
+  {date:'2026-07-03',entity:'RC',broker:'Cathay',type:'Sell',ticker:'00757',name:'FANG+ ETF',shares:'8,000',price:'128.7',gross:'1,029,600',net:'+1,028,196',pos:true},
+  {date:'2026-07-02',entity:'HuaQiang',broker:'Cathay',type:'Sell',ticker:'00830',name:'Cathay Semi ETF',shares:'10,000',price:'96.15',gross:'961,500',net:'+960,189',pos:true},
+  {date:'2026-06-30',entity:'RC',broker:'Mega',type:'Sell',ticker:'7769',name:'Hongjin Precision',shares:'1,000',price:'4,965',gross:'4,965,000',net:'+4,947,995',pos:true},
+  {date:'2026-06-10',entity:'HuaQiang',broker:'Cathay',type:'Sell',ticker:'00631L',name:'Taiwan 50x2 ETF',shares:'28,000',price:'32.15',gross:'900,200',net:'+898,972',pos:true},
+  {date:'2026-06-08',entity:'HuaQiang',broker:'Cathay',type:'Sell',ticker:'00631L',name:'Taiwan 50x2 ETF',shares:'40,000',price:'33.97',gross:'1,358,800',net:'+1,356,938',pos:true},
+  {date:'2026-05-08',entity:'RC (Private)',broker:'Sinopac',type:'Sell',ticker:'3006',name:'Lotes Co.',shares:'15,000',price:'177.5',gross:'2,662,500',net:'+2,619,621',pos:true},
+  {date:'2026-04-30',entity:'HuaQiang (Private)',broker:'Sinopac',type:'Sell',ticker:'7769',name:'Hongjin Precision',shares:'1,000',price:'4,965',gross:'4,965,000',net:'+4,947,995',pos:true},
+  {date:'2026-04-09',entity:'HuaQiang (Private)',broker:'Sinopac',type:'Dividend',ticker:'2330',name:'TSMC Cash Dividend',shares:'—',price:'—',gross:'—',net:'+12,000',pos:true},
+  {date:'2026-03-24',entity:'HuaQiang (Private)',broker:'Sinopac',type:'Sell',ticker:'6949',name:'Pharma Engine',shares:'3,000',price:'521',gross:'1,563,000',net:'+1,560,649',pos:true},
+  {date:'2026-03-18',entity:'HuaQiang (Private)',broker:'Sinopac',type:'Buy',ticker:'6949',name:'Pharma Engine',shares:'3,000',price:'580',gross:'1,740,000',net:'-1,740,738',pos:false},
+  {date:'2026-02-03',entity:'HuaQiang',broker:'Mega',type:'Buy',ticker:'2344',name:'Winbond',shares:'15,000',price:'110.5',gross:'1,657,500',net:'-1,659,577',pos:false},
+];
+const PNL=[
+  {date:'2026-06-30',entity:'RC',broker:'Mega',cat:'Stock Sale',ticker:'7769',name:'Hongjin',shares:'1 lot',net:'4,947,995',avg:'4,356.85',basis:'4,356,850',pnl:'+591,145',pos:true},
+  {date:'2026-06-10',entity:'HuaQiang',broker:'Cathay',cat:'Stock Sale',ticker:'00631L',name:'TW50x2',shares:'28 lots',net:'898,972',avg:'37.00',basis:'1,036,031',pnl:'-137,059',pos:false},
+  {date:'2026-06-08',entity:'HuaQiang',broker:'Cathay',cat:'Stock Sale',ticker:'00631L',name:'TW50x2',shares:'40 lots',net:'1,356,938',avg:'37.00',basis:'1,480,043',pnl:'-123,105',pos:false},
+  {date:'2026-05-08',entity:'RC (Private)',broker:'Sinopac',cat:'Stock Sale',ticker:'3006',name:'Lotes',shares:'15 lots',net:'2,619,621',avg:'168.00',basis:'840,357',pnl:'+1,779,264',pos:true},
+  {date:'2026-04-30',entity:'HuaQiang (Private)',broker:'Sinopac',cat:'Stock Sale',ticker:'7769',name:'Hongjin',shares:'1 lot',net:'4,947,995',avg:'4,356.85',basis:'4,356,850',pnl:'+591,145',pos:true},
+  {date:'2026-04-20',entity:'RC (Private)',broker:'Sinopac',cat:'Money Market',ticker:'—',name:'Money Market Income',shares:'—',net:'44,381',avg:'—',basis:'—',pnl:'+44,381',pos:true},
+  {date:'2026-04-09',entity:'HuaQiang (Private)',broker:'Sinopac',cat:'Cash Dividend',ticker:'2330',name:'TSMC',shares:'—',net:'12,000',avg:'—',basis:'—',pnl:'+12,000',pos:true},
+  {date:'2026-03-24',entity:'HuaQiang (Private)',broker:'Sinopac',cat:'Stock Sale',ticker:'6949',name:'Pharma Engine',shares:'3 lots',net:'1,560,649',avg:'357.72',basis:'1,073,160',pnl:'+487,489',pos:true},
+  {date:'2026-02-03',entity:'HuaQiang',broker:'Mega',cat:'Stock Sale',ticker:'2344',name:'Winbond',shares:'15 lots',net:'1,651,493',avg:'104.06',basis:'1,560,975',pnl:'+90,518',pos:true},
+  {date:'2026-01-30',entity:'RC',broker:'Mega',cat:'Stock Sale',ticker:'3131',name:'Hung Poo',shares:'1 lot',net:'1,678,892',avg:'0',basis:'0',pnl:'+1,678,892',pos:true},
+  {date:'2026-01-23',entity:'RC',broker:'Mega',cat:'Stock Sale',ticker:'7717',name:'Liqtech KY',shares:'1 lot',net:'527,083',avg:'360.50',basis:'360,500',pnl:'+166,583',pos:true},
+  {date:'2026-01-19',entity:'RC',broker:'Mega',cat:'Stock Sale',ticker:'3665',name:'BizLink KY',shares:'1 lot',net:'1,340,125',avg:'1,520.00',basis:'1,520,000',pnl:'-179,875',pos:false},
+];
+
+function show(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  document.getElementById('page-'+name).classList.add('active');
+}
+
+function typeBadge(t){
+  if(t==='Buy') return '<span class="tag tag-buy">Buy</span>';
+  if(t==='Sell') return '<span class="tag tag-sell">Sell</span>';
+  return '<span class="tag tag-gold" style="font-size:10px">Dividend</span>';
+}
+function catBadge(c){
+  if(c==='Stock Sale') return '<span class="tag tag-blue" style="font-size:10px">Stock Sale</span>';
+  if(c==='Money Market') return '<span class="tag tag-gold" style="font-size:10px">Money Market</span>';
+  return '<span class="tag tag-green" style="font-size:10px">Cash Dividend</span>';
+}
+
+function renderTrades(){
+  const entity=document.getElementById('f-entity').value;
+  const broker=document.getElementById('f-broker').value;
+  const month=document.getElementById('f-month').value;
+  const type=document.getElementById('f-type').value;
+  const rows=TRADES.filter(r=>
+    (!entity||r.entity===entity)&&(!broker||r.broker===broker)&&
+    (!month||r.date.startsWith(month))&&(!type||r.type===type));
+  document.getElementById('trade-count').textContent=rows.length+' record'+(rows.length!==1?'s':'')+' shown';
+  document.getElementById('trade-body').innerHTML=rows.length
+    ?rows.map(r=>`<tr><td>${r.date}</td><td>${r.entity}</td><td>${r.broker}</td><td>${typeBadge(r.type)}</td><td>${r.ticker}</td><td class="name">${r.name}</td><td class="tr">${r.shares}</td><td class="tr">${r.price}</td><td class="tr">${r.gross}</td><td class="tr ${r.pos?'pos':'neg'}">${r.net}</td></tr>`).join('')
+    :'<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No records match the selected filters.</td></tr>';
+}
+
+function renderPnl(){
+  const entity=document.getElementById('pf-entity').value;
+  const broker=document.getElementById('pf-broker').value;
+  const cat=document.getElementById('pf-cat').value;
+  const month=document.getElementById('pf-month').value;
+  const rows=PNL.filter(r=>
+    (!entity||r.entity===entity)&&(!broker||r.broker===broker)&&
+    (!cat||r.cat===cat)&&(!month||r.date.startsWith(month)));
+  const total=rows.reduce((s,r)=>s+parseInt(r.pnl.replace(/[^-\d]/g,'')),0);
+  document.getElementById('pnl-count').innerHTML=rows.length+' records · Total: <span class="'+(total>=0?'pos':'neg')+'">'+(total>=0?'+':'')+total.toLocaleString()+'</span>';
+  document.getElementById('pnl-body').innerHTML=rows.length
+    ?rows.map(r=>`<tr><td>${r.date}</td><td>${r.entity}</td><td>${r.broker}</td><td>${catBadge(r.cat)}</td><td>${r.ticker}</td><td class="name">${r.name}</td><td class="tr">${r.shares}</td><td class="tr">${r.net}</td><td class="tr">${r.avg}</td><td class="tr">${r.basis}</td><td class="tr ${r.pos?'pos':'neg'}" style="font-weight:600">${r.pnl}</td></tr>`).join('')
+    :'<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">No records match the selected filters.</td></tr>';
+}
+
+renderTrades();
+renderPnl();
+</script>
+</body>
+</html>
